@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barbería de Sergio - Panel de Control</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #f8fafc;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-6 text-gray-800">
+
+    <div id="app" class="max-w-5xl mx-auto space-y-6">
+
+        <!-- CABECERA DE PERFIL Y NAVEGACIÓN -->
+        <header class="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-2xl shadow-xs border border-gray-100">
+            <!-- Perfil Dinámico (Nombre del Negocio) -->
+            <div class="flex items-center gap-3">
+                <div id="userAvatar" class="w-10 h-10 rounded-full bg-[#587b6a] text-white font-bold flex items-center justify-center text-lg uppercase shadow-xs">
+                    <!-- Inicial del nombre -->
+                </div>
+                <div>
+                    <h2 id="profileNameDisplay" class="font-bold text-gray-900 leading-tight">barbería de Sergio</h2>
+                    <span class="inline-flex items-center gap-1.5 text-xs text-gray-500 font-medium">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> IA Activa
+                    </span>
+                </div>
+            </div>
+
+            <!-- Menú de Navegación -->
+            <nav class="flex items-center bg-gray-100 p-1 rounded-full text-xs font-semibold border border-gray-200/60">
+                <button onclick="switchTab('citas')" id="tab-citas" class="tab-btn px-4 py-2 rounded-full transition-all duration-200 bg-white text-gray-900 shadow-xs">
+                    📅 Citas
+                </button>
+                <button onclick="switchTab('clientes')" id="tab-clientes" class="tab-btn px-4 py-2 rounded-full transition-all duration-200 text-gray-600 hover:text-gray-900">
+                    👥 Clientes (<span id="clientCountNav">0</span>)
+                </button>
+                <button onclick="switchTab('automatizaciones')" id="tab-automatizaciones" class="tab-btn px-4 py-2 rounded-full transition-all duration-200 text-gray-600 hover:text-gray-900">
+                    🤖 Automatizaciones
+                </button>
+                <button onclick="switchTab('ajustes')" id="tab-ajustes" class="tab-btn px-4 py-2 rounded-full transition-all duration-200 text-gray-600 hover:text-gray-900">
+                    ⚙️ Ajustes
+                </button>
+            </nav>
+
+            <!-- Idioma y Salir -->
+            <div class="flex items-center gap-3 text-xs font-bold">
+                <div class="bg-gray-100 p-1 rounded-full flex border border-gray-200">
+                    <button id="lang-es" onclick="setLang('ES')" class="px-2.5 py-1 rounded-full bg-black text-white transition">ES</button>
+                    <button id="lang-en" onclick="setLang('EN')" class="px-2.5 py-1 rounded-full text-gray-500 hover:text-black transition">EN</button>
+                </div>
+                <button onclick="logout()" class="text-gray-400 hover:text-red-600 font-medium px-1 transition">
+                    Salir
+                </button>
+            </div>
+        </header>
+
+        <!-- SECCIÓN DE CITAS (MAIN DASHBOARD) -->
+        <main id="view-citas" class="view-panel space-y-6">
+
+            <!-- WIDGET CALENDARIO SEMANAL -->
+            <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-xs space-y-4">
+                <div class="flex items-center justify-between">
+                    <h3 id="calendarMonthTitle" class="text-lg font-bold text-gray-900">Septiembre 2026</h3>
+                    <div class="flex items-center gap-1">
+                        <button onclick="navigateWeek(-1)" class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-500 font-bold text-sm">&lt;</button>
+                        <button onclick="navigateWeek(1)" class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-500 font-bold text-sm">&gt;</button>
+                    </div>
+                </div>
+
+                <!-- Botones Hoy / Mañana -->
+                <div class="flex items-center gap-2">
+                    <button id="btnQuickHoy" onclick="selectQuickDate('today')" class="px-4 py-1.5 rounded-full text-xs font-semibold bg-[#1c2226] text-white transition">
+                        Hoy
+                    </button>
+                    <button id="btnQuickManana" onclick="selectQuickDate('tomorrow')" class="px-4 py-1.5 rounded-full text-xs font-semibold text-gray-400 hover:text-gray-800 transition">
+                        Mañana
+                    </button>
+                </div>
+
+                <!-- Días de la semana -->
+                <div id="weeklyCalendarGrid" class="grid grid-cols-7 text-center gap-1 pt-2">
+                    <!-- Se genera dinámicamente -->
+                </div>
+            </div>
+
+            <!-- TARJETA INGRESOS DEL DÍA -->
+            <div class="bg-[#587b6a] text-white p-6 rounded-2xl shadow-xs space-y-1">
+                <p class="text-xs font-bold tracking-wider text-emerald-100 uppercase">Ingresos del Día</p>
+                <h1 id="dailyIncomeDisplay" class="text-3xl md:text-4xl font-extrabold tracking-tight">€0 EUR</h1>
+                <p class="text-xs text-emerald-100/90 pt-1">
+                    Se calcula automáticamente con las citas marcadas como Completada.
+                </p>
+            </div>
+
+            <!-- BANNER INFORMATIVO -->
+            <div class="bg-[#fefce8] border border-[#fef08a] text-[#854d0e] p-4 rounded-xl text-xs font-medium flex items-center gap-2">
+                <span>✨</span>
+                <span>Los nuevos clientes se guardan automáticamente en tu directorio al agendar.</span>
+            </div>
+
+            <!-- LISTA Y AGENDA -->
+            <div class="bg-white rounded-2xl shadow-xs border border-gray-100 p-6 space-y-6">
+                <div class="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                        <h3 id="agendaHeaderTitle" class="text-xl font-bold text-gray-900">Agenda del YYYY-MM-DD</h3>
+                        <p id="appointmentSummary" class="text-xs text-gray-400 mt-1">0 citas agendadas para esta fecha</p>
+                    </div>
+
+                    <button onclick="openModal()" class="bg-[#587b6a] hover:bg-[#466355] text-white font-semibold text-xs px-4 py-2.5 rounded-xl transition shadow-xs flex items-center gap-2">
+                        <span>+ +</span> Agendar nueva cita
+                    </button>
+                </div>
+
+                <!-- Lista de citas / Estado vacío -->
+                <div id="appointmentsContainer">
+                    <!-- Dinámico -->
+                </div>
+            </div>
+        </main>
+
+        <!-- SECCIÓN DE CLIENTES -->
+        <section id="view-clientes" class="view-panel hidden bg-white rounded-2xl p-6 border border-gray-100 shadow-xs space-y-4">
+            <h3 class="text-xl font-bold text-gray-900">Directorio de Clientes</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm border-collapse">
+                    <thead>
+                        <tr class="border-b text-gray-400 font-semibold text-xs uppercase">
+                            <th class="py-3 px-2">Cliente</th>
+                            <th class="py-3 px-2">Contacto</th>
+                            <th class="py-3 px-2">Total Citas</th>
+                        </tr>
+                    </thead>
+                    <tbody id="clientsTableBody" class="divide-y divide-gray-100">
+                        <!-- Dinámico -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- SECCIÓN DE AUTOMATIZACIONES -->
+        <section id="view-automatizaciones" class="view-panel hidden bg-white rounded-2xl p-6 border border-gray-100 shadow-xs space-y-4">
+            <h3 class="text-xl font-bold text-gray-900">Automatizaciones con IA</h3>
+            <div class="space-y-3">
+                <div class="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
+                    <div>
+                        <p class="font-semibold text-gray-800 text-sm">Recordatorios Automáticos por WhatsApp</p>
+                        <p class="text-xs text-gray-500">Enviar confirmación 24h antes de la cita.</p>
+                    </div>
+                    <input type="checkbox" checked class="w-5 h-5 accent-[#587b6a] cursor-pointer">
+                </div>
+                <div class="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
+                    <div>
+                        <p class="font-semibold text-gray-800 text-sm">Agendamiento Inteligente por IA</p>
+                        <p class="text-xs text-gray-500">Permite a los clientes agendar mediante chat automático.</p>
+                    </div>
+                    <input type="checkbox" checked class="w-5 h-5 accent-[#587b6a] cursor-pointer">
+                </div>
+            </div>
+        </section>
+
+        <!-- SECCIÓN DE AJUSTES -->
+        <section id="view-ajustes" class="view-panel hidden bg-white rounded-2xl p-6 border border-gray-100 shadow-xs space-y-4">
+            <h3 class="text-xl font-bold text-gray-900">Ajustes del Perfil</h3>
+            <div class="max-w-md space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Nombre del Negocio / Perfil</label>
+                    <input type="text" id="profileNameInput" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#587b6a]">
+                </div>
+                <button onclick="saveProfileSettings()" class="bg-[#587b6a] text-white text-xs font-semibold px-4 py-2 rounded-xl hover:bg-[#466355] transition">
+                    Guardar Cambios
+                </button>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- MODAL PARA AGENDAR CITA -->
+    <div id="appointmentModal" class="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 hidden z-50">
+        <div class="bg-white w-full max-w-md rounded-2xl p-6 shadow-xl space-y-4">
+            <div class="flex items-center justify-between border-b pb-3">
+                <h4 class="font-bold text-lg text-gray-900">Agendar Nueva Cita</h4>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-xl font-bold">&times;</button>
+            </div>
+            <form onsubmit="handleCreateAppointment(event)" class="space-y-3">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Nombre del Cliente</label>
+                    <input type="text" id="clientName" required placeholder="Ej. Carlos Pérez" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#587b6a]">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Teléfono / Contacto</label>
+                    <input type="text" id="clientContact" required placeholder="+34 600 000 000" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#587b6a]">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Servicio</label>
+                    <input type="text" id="serviceName" required placeholder="Ej. Corte de Cabello / Barba" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#587b6a]">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Hora</label>
+                        <input type="time" id="appointmentTime" required class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#587b6a]">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Precio (€)</label>
+                        <input type="number" id="appointmentPrice" required min="0" step="1" placeholder="25" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#587b6a]">
+                    </div>
+                </div>
+                <div class="pt-3 flex justify-end gap-2">
+                    <button type="button" onclick="closeModal()" class="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700">Cancelar</button>
+                    <button type="submit" class="bg-[#587b6a] hover:bg-[#466355] text-white text-sm font-semibold px-5 py-2 rounded-xl transition">Guardar Cita</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- SCRIPT JS CON LÓGICA DE FECHA REAL Y PERFIL DINÁMICO -->
+    <script>
+        // Formatear objeto Date a ISO string (YYYY-MM-DD)
+        function formatDate(dateObj) {
+            const y = dateObj.getFullYear();
+            const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const d = String(dateObj.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        // Obtener fecha actual real del dispositivo
+        const REAL_TODAY_DATE = new Date();
+        const TODAY_STR = formatDate(REAL_TODAY_DATE);
+
+        // Limpieza de datos obsoletos en memoria local (ej. "perro")
+        const savedName = localStorage.getItem('profileName');
+        if (!savedName || savedName.toLowerCase() === 'perro') {
+            localStorage.setItem('profileName', 'barbería de Sergio');
+        }
+
+        // Estado inicial de la app
+        let state = {
+            profileName: localStorage.getItem('profileName') || "barbería de Sergio",
+            selectedDate: TODAY_STR,
+            calendarWeekStart: getMonday(REAL_TODAY_DATE),
+            appointments: JSON.parse(localStorage.getItem('appointments')) || [],
+            clients: JSON.parse(localStorage.getItem('clients')) || []
+        };
+
+        // Obtener Lunes de la semana seleccionada
+        function getMonday(d) {
+            const date = new Date(d);
+            const day = date.getDay();
+            const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+            return new Date(date.setDate(diff));
+        }
+
+        // Guardar estado en localStorage
+        function saveData() {
+            localStorage.setItem('profileName', state.profileName);
+            localStorage.setItem('appointments', JSON.stringify(state.appointments));
+            localStorage.setItem('clients', JSON.stringify(state.clients));
+        }
+
+        // Inicializar al cargar la página
+        document.addEventListener('DOMContentLoaded', () => {
+            updateProfileUI();
+            renderWeeklyCalendar();
+            renderAppointments();
+            renderClients();
+        });
+
+        // Actualizar interfaz del perfil
+        function updateProfileUI() {
+            const name = state.profileName.trim() || "barbería de Sergio";
+            document.getElementById('profileNameDisplay').textContent = name;
+            document.getElementById('profileNameInput').value = name;
+            document.getElementById('userAvatar').textContent = name.charAt(0).toUpperCase();
+        }
+
+        function saveProfileSettings() {
+            const newName = document.getElementById('profileNameInput').value.trim();
+            if (newName) {
+                state.profileName = newName;
+                saveData();
+                updateProfileUI();
+                alert('¡Nombre del perfil actualizado con éxito!');
+            }
+        }
+
+        // Renderizar calendario semanal dinámico
+        function renderWeeklyCalendar() {
+            const grid = document.getElementById('weeklyCalendarGrid');
+            grid.innerHTML = '';
+
+            const dayNames = ['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá', 'Do'];
+            const startMonday = new Date(state.calendarWeekStart);
+
+            const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+            document.getElementById('calendarMonthTitle').textContent = `${monthNames[startMonday.getMonth()]} ${startMonday.getFullYear()}`;
+
+            for (let i = 0; i < 7; i++) {
+                const currentDay = new Date(startMonday);
+                currentDay.setDate(startMonday.getDate() + i);
+                const dayStr = formatDate(currentDay);
+                const isSelected = dayStr === state.selectedDate;
+
+                const dayCol = document.createElement('div');
+                dayCol.className = 'flex flex-col items-center space-y-2 cursor-pointer';
+                dayCol.onclick = () => selectDate(dayStr);
+
+                dayCol.innerHTML = `
+                    <span class="text-xs text-gray-400 font-medium">${dayNames[i]}</span>
+                    <div class="w-10 h-10 flex items-center justify-center text-sm font-bold rounded-xl transition ${
+                        isSelected 
+                        ? 'bg-[#587b6a] text-white shadow-xs' 
+                        : 'text-gray-800 hover:bg-gray-100'
+                    }">
+                        ${currentDay.getDate()}
+                    </div>
+                `;
+                grid.appendChild(dayCol);
+            }
+
+            // Actualizar estilo de botones Hoy / Mañana
+            const btnHoy = document.getElementById('btnQuickHoy');
+            const btnManana = document.getElementById('btnQuickManana');
+
+            const tomorrowDate = new Date(REAL_TODAY_DATE);
+            tomorrowDate.setDate(REAL_TODAY_DATE.getDate() + 1);
+            const tomorrowStr = formatDate(tomorrowDate);
+
+            if (state.selectedDate === TODAY_STR) {
+                btnHoy.className = "px-4 py-1.5 rounded-full text-xs font-semibold bg-[#1c2226] text-white transition";
+                btnManana.className = "px-4 py-1.5 rounded-full text-xs font-semibold text-gray-400 hover:text-gray-800 transition";
+            } else if (state.selectedDate === tomorrowStr) {
+                btnManana.className = "px-4 py-1.5 rounded-full text-xs font-semibold bg-[#1c2226] text-white transition";
+                btnHoy.className = "px-4 py-1.5 rounded-full text-xs font-semibold text-gray-400 hover:text-gray-800 transition";
+            } else {
+                btnHoy.className = "px-4 py-1.5 rounded-full text-xs font-semibold text-gray-400 hover:text-gray-800 transition";
+                btnManana.className = "px-4 py-1.5 rounded-full text-xs font-semibold text-gray-400 hover:text-gray-800 transition";
+            }
+        }
+
+        function selectDate(dateStr) {
+            state.selectedDate = dateStr;
+            renderWeeklyCalendar();
+            renderAppointments();
+        }
+
+        function selectQuickDate(type) {
+            const targetDate = new Date(REAL_TODAY_DATE);
+            if (type === 'tomorrow') {
+                targetDate.setDate(REAL_TODAY_DATE.getDate() + 1);
+            }
+            state.selectedDate = formatDate(targetDate);
+            state.calendarWeekStart = getMonday(targetDate);
+            renderWeeklyCalendar();
+            renderAppointments();
+        }
+
+        function navigateWeek(direction) {
+            state.calendarWeekStart.setDate(state.calendarWeekStart.getDate() + (direction * 7));
+            renderWeeklyCalendar();
+        }
+
+        // Renderizar la agenda del día
+        function renderAppointments() {
+            document.getElementById('agendaHeaderTitle').textContent = `Agenda del ${state.selectedDate}`;
+
+            const filtered = state.appointments.filter(a => a.date === state.selectedDate);
+            const container = document.getElementById('appointmentsContainer');
+            document.getElementById('appointmentSummary').textContent = `${filtered.length} citas agendadas para esta fecha`;
+
+            const dailyIncome = filtered
+                .filter(a => a.status === 'Completada')
+                .reduce((sum, a) => sum + a.price, 0);
+
+            document.getElementById('dailyIncomeDisplay').textContent = `€${dailyIncome} EUR`;
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="border-2 border-dashed border-gray-100 rounded-2xl p-10 text-center space-y-4 my-2">
+                        <div class="w-12 h-12 rounded-2xl bg-gray-50 flex items-center justify-center mx-auto text-gray-400 text-xl">
+                            📅
+                        </div>
+                        <p class="font-medium text-gray-700 text-sm">¡Todo listo! No hay citas programadas para este día.</p>
+                        <button onclick="openModal()" class="bg-[#587b6a] hover:bg-[#466355] text-white font-semibold text-xs px-5 py-2.5 rounded-xl transition shadow-xs inline-flex items-center gap-1.5">
+                            + Agendar primera cita
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = `<div class="space-y-3">`;
+            filtered.forEach(app => {
+                const isCompleted = app.status === 'Completada';
+                html += `
+                    <div class="flex flex-wrap items-center justify-between p-4 bg-gray-50 hover:bg-gray-100/80 rounded-xl border border-gray-100 transition gap-4">
+                        <div class="flex items-center gap-4">
+                            <span class="font-bold text-gray-900 bg-white px-3 py-1.5 rounded-lg border text-sm shadow-2xs">${app.time}</span>
+                            <div>
+                                <h4 class="font-bold text-gray-900 text-sm">${app.clientName}</h4>
+                                <p class="text-xs text-gray-500">${app.serviceName} • <span class="font-semibold text-gray-700">€${app.price} EUR</span></p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="px-2.5 py-1 text-xs font-bold rounded-full ${
+                                isCompleted ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                            }">
+                                ${app.status}
+                            </span>
+                            ${!isCompleted ? `
+                                <button onclick="toggleAppointmentStatus(${app.id}, 'Completada')" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-1.5 rounded-lg transition">
+                                    Marcar Completada
+                                </button>
+                            ` : ''}
+                            <button onclick="deleteAppointment(${app.id})" class="text-xs text-red-500 hover:text-red-700 px-2 py-1 font-medium">
+                                Eliminar
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+            html += `</div>`;
+            container.innerHTML = html;
+        }
+
+        // Crear nueva cita
+        function handleCreateAppointment(e) {
+            e.preventDefault();
+            const clientName = document.getElementById('clientName').value.trim();
+            const clientContact = document.getElementById('clientContact').value.trim();
+            const serviceName = document.getElementById('serviceName').value.trim();
+            const time = document.getElementById('appointmentTime').value;
+            const price = parseFloat(document.getElementById('appointmentPrice').value) || 0;
+
+            const newAppointment = {
+                id: Date.now(),
+                date: state.selectedDate,
+                clientName: clientName,
+                clientContact: clientContact,
+                serviceName: serviceName,
+                time: time,
+                price: price,
+                status: 'Pendiente'
+            };
+
+            state.appointments.push(newAppointment);
+
+            let client = state.clients.find(c => c.name.toLowerCase() === clientName.toLowerCase());
+            if (!client) {
+                state.clients.push({ name: clientName, contact: clientContact, totalCount: 1 });
+            } else {
+                client.totalCount += 1;
+            }
+
+            saveData();
+            closeModal();
+
+            document.getElementById('clientName').value = '';
+            document.getElementById('clientContact').value = '';
+            document.getElementById('serviceName').value = '';
+            document.getElementById('appointmentTime').value = '';
+            document.getElementById('appointmentPrice').value = '';
+
+            renderAppointments();
+            renderClients();
+        }
+
+        function toggleAppointmentStatus(id, status) {
+            const app = state.appointments.find(a => a.id === id);
+            if (app) {
+                app.status = status;
+                saveData();
+                renderAppointments();
+            }
+        }
+
+        function deleteAppointment(id) {
+            if (confirm('¿Seguro que deseas eliminar esta cita?')) {
+                state.appointments = state.appointments.filter(a => a.id !== id);
+                saveData();
+                renderAppointments();
+            }
+        }
+
+        // Renderizar tabla de clientes
+        function renderClients() {
+            document.getElementById('clientCountNav').textContent = state.clients.length;
+            const tbody = document.getElementById('clientsTableBody');
+
+            if (state.clients.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="3" class="py-4 text-center text-xs text-gray-400">No hay clientes registrados aún.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = state.clients.map(c => `
+                <tr class="hover:bg-gray-50 transition">
+                    <td class="py-3 px-2 font-medium text-gray-900">${c.name}</td>
+                    <td class="py-3 px-2 text-gray-500">${c.contact}</td>
+                    <td class="py-3 px-2 text-gray-700 font-semibold">${c.totalCount}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Modal handlers
+        function openModal() { document.getElementById('appointmentModal').classList.remove('hidden'); }
+        function closeModal() { document.getElementById('appointmentModal').classList.add('hidden'); }
+
+        // Navegación de pestañas
+        function switchTab(tabId) {
+            document.querySelectorAll('.view-panel').forEach(p => p.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.remove('bg-white', 'text-gray-900', 'shadow-xs');
+                b.classList.add('text-gray-600');
+            });
+
+            document.getElementById(`view-${tabId}`).classList.remove('hidden');
+            const activeBtn = document.getElementById(`tab-${tabId}`);
+            activeBtn.classList.add('bg-white', 'text-gray-900', 'shadow-xs');
+            activeBtn.classList.remove('text-gray-600');
+        }
+
+        function setLang(lang) {
+            const esBtn = document.getElementById('lang-es');
+            const enBtn = document.getElementById('lang-en');
+            if (lang === 'ES') {
+                esBtn.className = "px-2.5 py-1 rounded-full bg-black text-white transition";
+                enBtn.className = "px-2.5 py-1 rounded-full text-gray-500 hover:text-black transition";
+            } else {
+                enBtn.className = "px-2.5 py-1 rounded-full bg-black text-white transition";
+                esBtn.className = "px-2.5 py-1 rounded-full text-gray-500 hover:text-black transition";
+            }
+        }
+
+        function logout() {
+            if (confirm('¿Deseas cerrar la sesión?')) {
+                alert('Sesión cerrada correctamente.');
+            }
+        }
+    </script>
+</body>
+</html>
