@@ -1,3 +1,4 @@
+cat << 'EOF' > app/api/public/book/route.js
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -16,9 +17,6 @@ function minutesToTime(minutes) {
   return `${h}:${m}`;
 }
 
-// ----------------------------------------------------
-// GET: CONSULTAR DISPONIBILIDAD DINÁMICA
-// ----------------------------------------------------
 export async function GET(request) {
   try {
     if (!supabaseUrl || !supabaseKey) {
@@ -106,9 +104,6 @@ export async function GET(request) {
   }
 }
 
-// ----------------------------------------------------
-// POST: CREAR / REGISTRAR NUEVA CITA
-// ----------------------------------------------------
 export async function POST(request) {
   try {
     if (!supabaseUrl || !supabaseKey) {
@@ -126,7 +121,6 @@ export async function POST(request) {
       }, { status: 400 });
     }
 
-    // 1. Obtener duración del servicio
     let durationMinutes = 30;
     if (service_id) {
       const { data: service } = await supabase
@@ -139,12 +133,10 @@ export async function POST(request) {
       }
     }
 
-    // Calcular end_time
     const startMin = timeToMinutes(start_time);
     const endMin = startMin + durationMinutes;
     const end_time = minutesToTime(endMin);
 
-    // 2. Re-validación anti-colisión: Verificar que el horario siga disponible
     const { data: existingAppts } = await supabase
       .from('appointments')
       .select('start_time, end_time')
@@ -164,7 +156,6 @@ export async function POST(request) {
       }, { status: 409 });
     }
 
-    // 3. Crear o buscar el cliente en la tabla `customers`
     let customerId = null;
     const { data: existingCustomer } = await supabase
       .from('customers')
@@ -187,7 +178,6 @@ export async function POST(request) {
       customerId = newCustomer.id;
     }
 
-    // 4. Crear la cita en la tabla `appointments`
     const { data: appointment, error: apptError } = await supabase
       .from('appointments')
       .insert([{
@@ -223,3 +213,5 @@ export async function POST(request) {
   } catch (err) {
     return NextResponse.json({ error: "Error interno del servidor", detail: err.message }, { status: 500 });
   }
+}
+EOF
