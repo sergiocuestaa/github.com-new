@@ -1,4 +1,3 @@
-cat << 'EOF' > app/api/public/book/route.js
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -214,4 +213,3 @@ export async function POST(request) {
     return NextResponse.json({ error: "Error interno del servidor", detail: err.message }, { status: 500 });
   }
 }
-EOF
