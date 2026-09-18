@@ -1,145 +1,87 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseKey);
-
+// 1. GET: Verificación del Webhook por parte de Meta
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
+
   const mode = searchParams.get('hub.mode');
   const token = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
 
-  if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) {
-    return new NextResponse(challenge, { status: 200 });
+  // El verify token por defecto configurado para la app
+  const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'clinicadental123';
+
+  if (mode && token) {
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      console.log('WEBHOOK_VERIFIED');
+      return new Response(challenge, { status: 200 });
+    } else {
+      return new Response('Forbidden', { status: 403 });
+    }
   }
-  return new NextResponse('Forbidden', { status: 403 });
+
+  return new Response('Bad Request', { status: 400 });
 }
 
+// 2. POST: Recepción de mensajes entrantes de WhatsApp
 export async function POST(request) {
   try {
     const body = await request.json();
-    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
-    if (!message || message.type !== 'text') {
-      return NextResponse.json({ status: 'ignored' }, { status: 200 });
+    // Comprobar si es un evento de mensaje de WhatsApp
+    if (
+      body.object &&
+      body.entry &&
+      body.entry[0].changes &&
+      body.entry[0].changes[0].value.messages &&
+      body.entry[0].changes[0].value.messages[0]
+    ) {
+      const messageObj = body.entry[0].changes[0].value.messages[0];
+      const fromNumber = messageObj.from; // Número del cliente
+      const messageText = messageObj.text?.body; // Texto enviado
+
+      if (messageText) {
+        console.log(`Mensaje recibido de ${fromNumber}: ${messageText}`);
+
+        // Responder al usuario vía Meta API
+        await sendWhatsAppMessage(fromNumber, `Hola, he recibido tu mensaje: "${messageText}". Estamos procesando tu consulta.`);
+      }
     }
 
-    const wamid = message.id;
-    const phone = message.from;
-    const userText = message.text.body;
-
-    processMessageAsync(wamid, phone, userText);
-
-    return NextResponse.json({ status: 'processing' }, { status: 200 });
+    return NextResponse.json({ status: 'ok' }, { status: 200 });
   } catch (error) {
-    console.error('Error en Webhook:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Error procesando webhook:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
 
-async function processMessageAsync(wamid, phone, userText) {
-  try {
-    const { data: existingMsg } = await supabase
-      .from('messages')
-      .select('id')
-      .eq('wamid', wamid)
-      .maybeSingle();
-
-    if (existingMsg) {
-      console.log('Mensaje duplicado omitido:', wamid);
-      return;
-    }
-
-    const { error: contactErr } = await supabase.from('contacts').upsert({ phone }, { onConflict: 'phone' });
-    if (contactErr) console.error('Error guardando contacto:', contactErr.message);
-
-    const { error: userMsgErr } = await supabase.from('messages').insert({
-      wamid: wamid,
-      phone: phone,
-      role: 'user',
-      content: userText,
-    });
-    if (userMsgErr) console.error('Error guardando mensaje de usuario:', userMsgErr.message);
-
-    const { data: history, error: historyErr } = await supabase
-      .from('messages')
-      .select('role, content')
-      .eq('phone', phone)
-      .order('created_at', { ascending: false })
-      .limit(10);
-
-    if (historyErr) console.error('Error leyendo historial:', historyErr.message);
-
-    const formattedHistory = (history || []).reverse().map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-
-    const systemPrompt = {
-      role: 'system',
-      content: `Eres la asistente virtual experta de Software Visa Eesti / Clínica Dental Elite.
-
-REGLAS DE INTERACCIÓN:
-1. Tono profesional, empático y fluido. Habla de "tú" y sé amable.
-2. Formato para WhatsApp: Da respuestas breves (máximo 2 párrafos cortos). La gente no lee textos largos. Usa emojis de manera limpia.
-3. No saludes repetitivamente si la conversación ya está avanzada.
-
-OBJETIVO PRINCIPAL:
-- Responder dudas sobre tratamientos dentales (implantes, diseño de sonrisa, alineadores).
-- Guiar sutilmente al paciente a calificar para agendar una cita de valoración presencial.
-- Termina la mayoría de tus respuestas con una pregunta corta para mantener el interés del paciente.`,
-    };
-
-    const openAIRes = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [systemPrompt, ...formattedHistory],
-      }),
-    });
-
-    const aiData = await openAIRes.json();
-    const gptReply =
-      aiData.choices?.[0]?.message?.content ||
-      'Disculpa, tuve un problema temporal procesando tu solicitud.';
-
-    const { error: aiMsgErr } = await supabase.from('messages').insert({
-      phone: phone,
-      role: 'assistant',
-      content: gptReply,
-    });
-    if (aiMsgErr) console.error('Error guardando respuesta IA:', aiMsgErr.message);
-
-    await sendWhatsAppMessage(phone, gptReply);
-  } catch (err) {
-    console.error('Error en proceso asíncrono:', err);
-  }
-}
-
-async function sendWhatsAppMessage(phone, text) {
+// Función auxiliar para enviar mensajes con la API de Graph
+async function sendWhatsAppMessage(to, text) {
   const token = process.env.WHATSAPP_TOKEN;
   const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
-  const res = await fetch(\`https://graph.facebook.com/v18.0/\${phoneId}/messages\`, {
+  if (!token || !phoneId) {
+    console.error('Faltan variables de entorno WHATSAPP_TOKEN o WHATSAPP_PHONE_NUMBER_ID');
+    return;
+  }
+
+  const res = await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
     method: 'POST',
     headers: {
-      Authorization: \`Bearer \${token}\`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       messaging_product: 'whatsapp',
-      to: phone,
+      to: to,
       type: 'text',
       text: { body: text },
     }),
   });
 
-  const data = await res.json();
-  console.log('Mensaje enviado a Meta:', data);
+  const responseData = await res.json();
+  if (!res.ok) {
+    console.error('Error enviando mensaje vía Meta API:', responseData);
+  }
+  return responseData;
 }
