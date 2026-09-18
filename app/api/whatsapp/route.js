@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 
-// 1. GET: Verificación del Webhook por parte de Meta
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
 
@@ -8,7 +7,6 @@ export async function GET(request) {
   const token = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
 
-  // El verify token por defecto configurado para la app
   const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'clinicadental123';
 
   if (mode && token) {
@@ -23,12 +21,10 @@ export async function GET(request) {
   return new Response('Bad Request', { status: 400 });
 }
 
-// 2. POST: Recepción de mensajes entrantes de WhatsApp
 export async function POST(request) {
   try {
     const body = await request.json();
 
-    // Comprobar si es un evento de mensaje de WhatsApp
     if (
       body.object &&
       body.entry &&
@@ -37,13 +33,11 @@ export async function POST(request) {
       body.entry[0].changes[0].value.messages[0]
     ) {
       const messageObj = body.entry[0].changes[0].value.messages[0];
-      const fromNumber = messageObj.from; // Número del cliente
-      const messageText = messageObj.text?.body; // Texto enviado
+      const fromNumber = messageObj.from;
+      const messageText = messageObj.text?.body;
 
       if (messageText) {
         console.log(`Mensaje recibido de ${fromNumber}: ${messageText}`);
-
-        // Responder al usuario vía Meta API
         await sendWhatsAppMessage(fromNumber, `Hola, he recibido tu mensaje: "${messageText}". Estamos procesando tu consulta.`);
       }
     }
@@ -55,7 +49,6 @@ export async function POST(request) {
   }
 }
 
-// Función auxiliar para enviar mensajes con la API de Graph
 async function sendWhatsAppMessage(to, text) {
   const token = process.env.WHATSAPP_TOKEN;
   const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
