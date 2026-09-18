@@ -223,4 +223,3 @@ export async function POST(request) {
   } catch (err) {
     return NextResponse.json({ error: "Error interno del servidor", detail: err.message }, { status: 500 });
   }
-} python3 -m http.server 3000
