@@ -1,10 +1,20 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Inicializar cliente de Supabase
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+// Inicializar cliente de Supabase de forma segura
+const getSupabaseClient = () => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey || !supabaseUrl.startsWith('http')) {
+    console.warn('Supabase URL o Key no válidas o no configuradas.');
+    return null;
+  }
+
+  return createClient(supabaseUrl, supabaseKey);
+};
+
+const supabase = getSupabaseClient();
 
 // GET: Verificación del Webhook por Meta
 export async function GET(request) {
@@ -35,10 +45,9 @@ export async function POST(request) {
       body.entry[0].changes[0].value.messages[0]
     ) {
       const message = body.entry[0].changes[0].value.messages[0];
-      const from = message.from; // Número del cliente
+      const from = message.from;
       const messageText = message.text ? message.text.body : '';
 
-      // Ignorar eventos sin texto
       if (!messageText) {
         return NextResponse.json({ status: 'ignored' }, { status: 200 });
       }
@@ -48,13 +57,13 @@ export async function POST(request) {
       // 1. Guardar mensaje del usuario en Supabase
       await saveMessageToSupabase(from, 'user', messageText);
 
-      // 2. Obtener la respuesta inteligente pasando el historial de conversación
+      // 2. Obtener respuesta inteligente con historial
       const aiResponse = await getOpenAIResponseWithHistory(messageText, from);
 
       // 3. Guardar respuesta de la IA en Supabase
       await saveMessageToSupabase(from, 'assistant', aiResponse);
 
-      // 4. Enviar la respuesta al cliente por WhatsApp
+      // 4. Enviar respuesta al cliente por WhatsApp
       await sendWhatsAppMessage(from, aiResponse);
     }
 
@@ -67,10 +76,7 @@ export async function POST(request) {
 
 // Guardar mensaje en Supabase
 async function saveMessageToSupabase(phoneNumber, role, content) {
-  if (!supabase) {
-    console.warn('Supabase no está configurado. Omitiendo guardado de historial.');
-    return;
-  }
+  if (!supabase) return;
 
   try {
     const { error } = await supabase
@@ -85,7 +91,7 @@ async function saveMessageToSupabase(phoneNumber, role, content) {
   }
 }
 
-// Obtener el historial de la conversación desde Supabase
+// Obtener historial desde Supabase
 async function getChatHistory(phoneNumber, limit = 10) {
   if (!supabase) return [];
 
@@ -98,11 +104,10 @@ async function getChatHistory(phoneNumber, limit = 10) {
       .limit(limit);
 
     if (error) {
-      console.error('Error obteniendo historial de Supabase:', error);
+      console.error('Error obteniendo historial:', error);
       return [];
     }
 
-    // Invertir para ordenar cronológicamente
     return data ? data.reverse().map(msg => ({ role: msg.role, content: msg.content })) : [];
   } catch (err) {
     console.error('Excepción al obtener historial:', err);
@@ -110,38 +115,25 @@ async function getChatHistory(phoneNumber, limit = 10) {
   }
 }
 
-// Función para interactuar con OpenAI conservando el historial
+// OpenAI con historial
 async function getOpenAIResponseWithHistory(userMessage, phoneNumber) {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
-    console.error('OPENAI_API_KEY no está configurada');
-    return '¡Hola! En este momento nuestro sistema de asistencia inteligente está en mantenimiento. Un asesor humano te contactará a la brevedad.';
+    return '¡Hola! Sistema temporalmente en mantenimiento.';
   }
 
   const systemPrompt = {
     role: 'system',
     content: `
 Eres el asistente virtual con Inteligencia Artificial de "Clínica Dental Elite".
-Tu objetivo es brindar información amable, profesional y ágil a los clientes, así como ayudarles a agendar o consultar citas médicas.
-
-Información general de la clínica:
-- Horarios de atención: Lunes a Viernes de 9:00 AM a 7:00 PM, Sábados de 9:00 AM a 2:00 PM.
-- Dirección: Av. Principal #123, Colonia Centro.
-- Servicios: Limpieza dental, Blanqueamiento, Ortodoncia (Brackets e Invisalign), Endodoncia, Implantes y Valoración General.
-
-Instrucciones de comportamiento:
-- Sé siempre cortés, empático y profesional.
-- Utiliza la información que el cliente te haya compartido en mensajes anteriores (su nombre, tratamiento solicitado, etc.).
-- Respuestas breves y concisas, ideales para WhatsApp (máximo 2 a 3 párrafos cortos).
-- Si el cliente desea agendar una cita, solicita amablemente su nombre completo, el servicio deseado y la fecha/hora de preferencia.
+Horarios: Lunes a Viernes de 9:00 AM a 7:00 PM, Sábados de 9:00 AM a 2:00 PM.
+Servicios: Limpieza dental, Blanqueamiento, Ortodoncia, Endodoncia, Implantes y Valoración General.
+Utiliza la información que el cliente te comparta previamente (como su nombre).
 `
   };
 
-  // Cargar mensajes pasados
   const history = await getChatHistory(phoneNumber, 10);
-
-  // Si no hay historial suficiente en la base de datos, usamos la interacción actual
   const messagesToSend = history.length > 0 
     ? [systemPrompt, ...history] 
     : [systemPrompt, { role: 'user', content: userMessage }];
@@ -162,31 +154,26 @@ Instrucciones de comportamiento:
     });
 
     const data = await response.json();
-
     if (data.choices && data.choices[0] && data.choices[0].message) {
       return data.choices[0].message.content.trim();
     } else {
-      console.error('Respuesta inesperada de OpenAI:', JSON.stringify(data));
-      return '¡Hola! Gracias por escribir a Clínica Dental Elite. ¿En qué puedo ayudarte hoy?';
+      return '¡Hola! Gracias por escribir a Clínica Dental Elite.';
     }
   } catch (error) {
-    console.error('Error al conectar con OpenAI:', error);
-    return 'Gracias por escribir a Clínica Dental Elite. Un asesor responderá tu consulta en breve.';
+    console.error('Error con OpenAI:', error);
+    return 'Gracias por escribir a Clínica Dental Elite.';
   }
 }
 
-// Función para enviar mensajes vía la API de WhatsApp Business
+// Enviar mensaje por WhatsApp
 async function sendWhatsAppMessage(to, text) {
   const token = process.env.WHATSAPP_TOKEN;
   const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
-  if (!token || !phoneId) {
-    console.error('WHATSAPP_TOKEN o WHATSAPP_PHONE_NUMBER_ID no configurados');
-    return;
-  }
+  if (!token || !phoneId) return;
 
   try {
-    const res = await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
+    await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -199,10 +186,7 @@ async function sendWhatsAppMessage(to, text) {
         text: { body: text },
       }),
     });
-
-    const resData = await res.json();
-    console.log('Respuesta del envío a WhatsApp:', JSON.stringify(resData));
   } catch (error) {
-    console.error('Error al enviar el mensaje de WhatsApp:', error);
+    console.error('Error al enviar WhatsApp:', error);
   }
 }
