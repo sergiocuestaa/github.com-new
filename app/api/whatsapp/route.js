@@ -38,17 +38,23 @@ export async function POST(request) {
       const from = message.from; // Número del cliente
       const messageText = message.text ? message.text.body : '';
 
-      // Evitar responder a estados u otros tipos de eventos sin texto
+      // Ignorar eventos sin texto
       if (!messageText) {
         return NextResponse.json({ status: 'ignored' }, { status: 200 });
       }
 
       console.log(`Mensaje recibido de ${from}: "${messageText}"`);
 
-      // 1. Obtener la respuesta inteligente desde OpenAI
-      const aiResponse = await getOpenAIResponse(messageText, from);
+      // 1. Guardar mensaje del usuario en Supabase
+      await saveMessageToSupabase(from, 'user', messageText);
 
-      // 2. Enviar la respuesta al cliente por WhatsApp
+      // 2. Obtener la respuesta inteligente pasando el historial de conversación
+      const aiResponse = await getOpenAIResponseWithHistory(messageText, from);
+
+      // 3. Guardar respuesta de la IA en Supabase
+      await saveMessageToSupabase(from, 'assistant', aiResponse);
+
+      // 4. Enviar la respuesta al cliente por WhatsApp
       await sendWhatsAppMessage(from, aiResponse);
     }
 
@@ -59,8 +65,53 @@ export async function POST(request) {
   }
 }
 
-// Función para interactuar con OpenAI
-async function getOpenAIResponse(userMessage, phoneNumber) {
+// Guardar mensaje en Supabase
+async function saveMessageToSupabase(phoneNumber, role, content) {
+  if (!supabase) {
+    console.warn('Supabase no está configurado. Omitiendo guardado de historial.');
+    return;
+  }
+
+  try {
+    const { error } = await supabase
+      .from('chat_messages')
+      .insert([{ phone_number: phoneNumber, role: role, content: content }]);
+
+    if (error) {
+      console.error('Error al insertar mensaje en Supabase:', error);
+    }
+  } catch (err) {
+    console.error('Excepción al guardar en Supabase:', err);
+  }
+}
+
+// Obtener el historial de la conversación desde Supabase
+async function getChatHistory(phoneNumber, limit = 10) {
+  if (!supabase) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .select('role, content')
+      .eq('phone_number', phoneNumber)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('Error obteniendo historial de Supabase:', error);
+      return [];
+    }
+
+    // Invertir para ordenar cronológicamente
+    return data ? data.reverse().map(msg => ({ role: msg.role, content: msg.content })) : [];
+  } catch (err) {
+    console.error('Excepción al obtener historial:', err);
+    return [];
+  }
+}
+
+// Función para interactuar con OpenAI conservando el historial
+async function getOpenAIResponseWithHistory(userMessage, phoneNumber) {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -68,7 +119,9 @@ async function getOpenAIResponse(userMessage, phoneNumber) {
     return '¡Hola! En este momento nuestro sistema de asistencia inteligente está en mantenimiento. Un asesor humano te contactará a la brevedad.';
   }
 
-  const systemPrompt = `
+  const systemPrompt = {
+    role: 'system',
+    content: `
 Eres el asistente virtual con Inteligencia Artificial de "Clínica Dental Elite".
 Tu objetivo es brindar información amable, profesional y ágil a los clientes, así como ayudarles a agendar o consultar citas médicas.
 
@@ -79,10 +132,19 @@ Información general de la clínica:
 
 Instrucciones de comportamiento:
 - Sé siempre cortés, empático y profesional.
+- Utiliza la información que el cliente te haya compartido en mensajes anteriores (su nombre, tratamiento solicitado, etc.).
 - Respuestas breves y concisas, ideales para WhatsApp (máximo 2 a 3 párrafos cortos).
 - Si el cliente desea agendar una cita, solicita amablemente su nombre completo, el servicio deseado y la fecha/hora de preferencia.
-- Mantén un tono cordial y servicial.
-`;
+`
+  };
+
+  // Cargar mensajes pasados
+  const history = await getChatHistory(phoneNumber, 10);
+
+  // Si no hay historial suficiente en la base de datos, usamos la interacción actual
+  const messagesToSend = history.length > 0 
+    ? [systemPrompt, ...history] 
+    : [systemPrompt, { role: 'user', content: userMessage }];
 
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -93,10 +155,7 @@ Instrucciones de comportamiento:
       },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage },
-        ],
+        messages: messagesToSend,
         temperature: 0.7,
         max_tokens: 300,
       }),
@@ -108,7 +167,7 @@ Instrucciones de comportamiento:
       return data.choices[0].message.content.trim();
     } else {
       console.error('Respuesta inesperada de OpenAI:', JSON.stringify(data));
-      return '¡Hola! Gracias por comunicarte con Clínica Dental Elite. ¿En qué podemos ayudarte hoy?';
+      return '¡Hola! Gracias por escribir a Clínica Dental Elite. ¿En qué puedo ayudarte hoy?';
     }
   } catch (error) {
     console.error('Error al conectar con OpenAI:', error);
