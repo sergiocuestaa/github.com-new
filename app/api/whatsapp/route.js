@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-export async function GET(req) {
-  const { searchParams } = new URL(req.url);
+// Inicializar cliente de Supabase
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+
+// GET: Verificación del Webhook por Meta
+export async function GET(request) {
+  const { searchParams } = new URL(request.url);
   const mode = searchParams.get('hub.mode');
   const token = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
@@ -9,70 +16,134 @@ export async function GET(req) {
   const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'clinicadental123';
 
   if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    console.log('WEBHOOK_VERIFIED');
     return new Response(challenge, { status: 200 });
+  } else {
+    return NextResponse.json({ error: 'Token invalido' }, { status: 403 });
   }
-
-  return NextResponse.json({ error: 'Token invalido' }, { status: 403 });
 }
 
-export async function POST(req) {
+// POST: Procesar mensajes entrantes de WhatsApp
+export async function POST(request) {
   try {
-    const body = await req.json();
-    
-    // Imprimir el evento exacto recibido de Meta
-    console.log("--- EVENTO RECIBIDO DE META ---");
-    console.log(JSON.stringify(body, null, 2));
+    const body = await request.json();
 
-    const entry = body.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const value = changes?.value;
-    const message = value?.messages?.[0];
+    if (
+      body.entry &&
+      body.entry[0].changes &&
+      body.entry[0].changes[0].value.messages &&
+      body.entry[0].changes[0].value.messages[0]
+    ) {
+      const message = body.entry[0].changes[0].value.messages[0];
+      const from = message.from; // Número del cliente
+      const messageText = message.text ? message.text.body : '';
 
-    if (!message) {
-      console.log("No es un mensaje de texto entrante (puede ser confirmación de lectura/entrega)");
-      return NextResponse.json({ status: 'ignored' }, { status: 200 });
+      // Evitar responder a estados u otros tipos de eventos sin texto
+      if (!messageText) {
+        return NextResponse.json({ status: 'ignored' }, { status: 200 });
+      }
+
+      console.log(`Mensaje recibido de ${from}: "${messageText}"`);
+
+      // 1. Obtener la respuesta inteligente desde OpenAI
+      const aiResponse = await getOpenAIResponse(messageText, from);
+
+      // 2. Enviar la respuesta al cliente por WhatsApp
+      await sendWhatsAppMessage(from, aiResponse);
     }
 
-    const from = message.from;
-    const text = message.text?.body;
-
-    console.log(`Mensaje recibido de ${from}: "${text}"`);
-
-    // Respuesta automatica temporal
-    if (text) {
-      await sendWhatsAppMessage(from, `¡Hola! Recibí tu mensaje: "${text}". Un asesor te responderá pronto.`);
-    }
-
-    return NextResponse.json({ status: 'ok' }, { status: 200 });
-  } catch (err) {
-    console.error("Error procesando webhook:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ status: 'success' }, { status: 200 });
+  } catch (error) {
+    console.error('Error al procesar el webhook:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
+// Función para interactuar con OpenAI
+async function getOpenAIResponse(userMessage, phoneNumber) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    console.error('OPENAI_API_KEY no está configurada');
+    return '¡Hola! En este momento nuestro sistema de asistencia inteligente está en mantenimiento. Un asesor humano te contactará a la brevedad.';
+  }
+
+  const systemPrompt = `
+Eres el asistente virtual con Inteligencia Artificial de "Clínica Dental Elite".
+Tu objetivo es brindar información amable, profesional y ágil a los clientes, así como ayudarles a agendar o consultar citas médicas.
+
+Información general de la clínica:
+- Horarios de atención: Lunes a Viernes de 9:00 AM a 7:00 PM, Sábados de 9:00 AM a 2:00 PM.
+- Dirección: Av. Principal #123, Colonia Centro.
+- Servicios: Limpieza dental, Blanqueamiento, Ortodoncia (Brackets e Invisalign), Endodoncia, Implantes y Valoración General.
+
+Instrucciones de comportamiento:
+- Sé siempre cortés, empático y profesional.
+- Respuestas breves y concisas, ideales para WhatsApp (máximo 2 a 3 párrafos cortos).
+- Si el cliente desea agendar una cita, solicita amablemente su nombre completo, el servicio deseado y la fecha/hora de preferencia.
+- Mantén un tono cordial y servicial.
+`;
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage },
+        ],
+        temperature: 0.7,
+        max_tokens: 300,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.choices && data.choices[0] && data.choices[0].message) {
+      return data.choices[0].message.content.trim();
+    } else {
+      console.error('Respuesta inesperada de OpenAI:', JSON.stringify(data));
+      return '¡Hola! Gracias por comunicarte con Clínica Dental Elite. ¿En qué podemos ayudarte hoy?';
+    }
+  } catch (error) {
+    console.error('Error al conectar con OpenAI:', error);
+    return 'Gracias por escribir a Clínica Dental Elite. Un asesor responderá tu consulta en breve.';
+  }
+}
+
+// Función para enviar mensajes vía la API de WhatsApp Business
 async function sendWhatsAppMessage(to, text) {
   const token = process.env.WHATSAPP_TOKEN;
   const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
   if (!token || !phoneId) {
-    console.error("Faltan variables WHATSAPP_TOKEN o WHATSAPP_PHONE_NUMBER_ID en Vercel");
+    console.error('WHATSAPP_TOKEN o WHATSAPP_PHONE_NUMBER_ID no configurados');
     return;
   }
 
-  const res = await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      to: to,
-      type: 'text',
-      text: { body: text },
-    }),
-  });
+  try {
+    const res = await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: to,
+        type: 'text',
+        text: { body: text },
+      }),
+    });
 
-  const data = await res.json();
-  console.log("Respuesta de la API de WhatsApp:", JSON.stringify(data));
+    const resData = await res.json();
+    console.log('Respuesta del envío a WhatsApp:', JSON.stringify(resData));
+  } catch (error) {
+    console.error('Error al enviar el mensaje de WhatsApp:', error);
+  }
 }
