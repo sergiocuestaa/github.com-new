@@ -25,6 +25,7 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const body = await request.json();
+    console.log("WEBHOOK BODY RECIBIDO:", JSON.stringify(body, null, 2));
     
     if (
       body.object &&
@@ -82,7 +83,7 @@ export async function POST(request) {
 
     return NextResponse.json({ status: 'ok' }, { status: 200 });
   } catch (error) {
-    console.error('Error en webhook de WhatsApp:', error);
+    console.error('Error crítico en webhook de WhatsApp:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
@@ -162,9 +163,12 @@ async function getOpenAIResponse(messagesHistory, phoneNumber, clinic) {
 async function sendWhatsAppMessage(to, text) {
   const token = process.env.WHATSAPP_TOKEN;
   const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  if (!token || !phoneId) return;
+  if (!token || !phoneId) {
+    console.error("Faltan las credenciales WHATSAPP_TOKEN o WHATSAPP_PHONE_NUMBER_ID");
+    return;
+  }
 
-  return await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
+  const res = await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -177,4 +181,8 @@ async function sendWhatsAppMessage(to, text) {
       text: { body: text },
     }),
   });
+
+  const resData = await res.json();
+  console.log("Respuesta de Meta al enviar mensaje:", resData);
+  return res;
 }
