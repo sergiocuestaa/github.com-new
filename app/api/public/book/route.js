@@ -3,213 +3,193 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const openaiApiKey = process.env.OPENAI_API_KEY;
 
-function timeToMinutes(timeStr) {
-  if (!timeStr) return 0;
-  const [h, m] = timeStr.split(':').map(Number);
-  return h * 60 + m;
-}
-
-function minutesToTime(minutes) {
-  const h = Math.floor(minutes / 60).toString().padStart(2, '0');
-  const m = (minutes % 60).toString().padStart(2, '0');
-  return `${h}:${m}`;
-}
-
+// Verificación del Webhook de Meta
 export async function GET(request) {
-  try {
-    if (!supabaseUrl || !supabaseKey) {
-      return NextResponse.json({ error: "Faltan variables de entorno de Supabase" }, { status: 500 });
+  const { searchParams } = new URL(request.url);
+  const mode = searchParams.get('hub.mode');
+  const token = searchParams.get('hub.verify_token');
+  const challenge = searchParams.get('hub.challenge');
+  const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'clinicadental123';
+
+  if (mode && token) {
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      return new Response(challenge, { status: 200 });
+    } else {
+      return new Response('Forbidden', { status: 403 });
     }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    const { searchParams } = new URL(request.url);
-
-    const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
-    const serviceId = searchParams.get('service_id');
-    const staffId = searchParams.get('staff_id');
-
-    const { data: settings, error: settingsError } = await supabase
-      .from('settings')
-      .select('*')
-      .eq('id', 1)
-      .single();
-
-    if (settingsError) {
-      return NextResponse.json({ error: "Error al consultar la configuración", detail: settingsError.message }, { status: 500 });
-    }
-
-    let durationMinutes = 30;
-    let serviceName = null;
-
-    if (serviceId) {
-      const { data: service } = await supabase
-        .from('services')
-        .select('*')
-        .eq('id', serviceId)
-        .single();
-
-      if (service) {
-        durationMinutes = service.duration_minutes || 30;
-        serviceName = service.name;
-      }
-    }
-
-    let query = supabase
-      .from('appointments')
-      .select('start_time, end_time, staff_id')
-      .eq('date', date)
-      .neq('status', 'cancelled');
-
-    if (staffId) {
-      query = query.eq('staff_id', staffId);
-    }
-
-    const { data: appointments, error: apptError } = await query;
-    if (apptError) {
-      return NextResponse.json({ error: "Error al consultar citas agendadas", detail: apptError.message }, { status: 500 });
-    }
-
-    const openMinutes = timeToMinutes(settings.hours_open);
-    const closeMinutes = timeToMinutes(settings.hours_close);
-
-    const bookedRanges = (appointments || []).map(appt => ({
-      start: timeToMinutes(appt.start_time),
-      end: timeToMinutes(appt.end_time)
-    }));
-
-    const availableSlots = [];
-
-    for (let current = openMinutes; current + durationMinutes <= closeMinutes; current += durationMinutes) {
-      const slotEnd = current + durationMinutes;
-      const isOverlapping = bookedRanges.some(range => current < range.end && slotEnd > range.start);
-
-      if (!isOverlapping) {
-        availableSlots.push(minutesToTime(current));
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      negocio: settings.business_name,
-      fecha: date,
-      servicio: serviceName || 'General',
-      duracion_minutos: durationMinutes,
-      horarios_disponibles: availableSlots
-    });
-
-  } catch (err) {
-    return NextResponse.json({ error: "Error interno del servidor", detail: err.message }, { status: 500 });
   }
+  return new Response('Bad Request', { status: 400 });
 }
 
+// Recepción de mensajes de WhatsApp
 export async function POST(request) {
   try {
-    if (!supabaseUrl || !supabaseKey) {
-      return NextResponse.json({ error: "Faltan variables de entorno de Supabase" }, { status: 500 });
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
     const body = await request.json();
+    
+    if (
+      body.object &&
+      body.entry &&
+      body.entry[0].changes &&
+      body.entry[0].changes[0].value.messages &&
+      body.entry[0].changes[0].value.messages[0]
+    ) {
+      const messageObj = body.entry[0].changes[0].value.messages[0];
+      const fromNumber = messageObj.from;
+      const messageText = messageObj.text?.body;
 
-    const { customer_name, customer_phone, customer_email, date, start_time, service_id, staff_id } = body;
+      if (messageText) {
+        const supabase = createClient(supabaseUrl, supabaseKey);
 
-    if (!customer_name || !customer_phone || !date || !start_time) {
-      return NextResponse.json({
-        error: "Faltan datos obligatorios: customer_name, customer_phone, date, start_time"
-      }, { status: 400 });
-    }
+        // 1. Obtener la información de la clínica/sucursal desde Supabase dinámicamente
+        const { data: clinicData } = await supabase
+          .from('clinics')
+          .select('*')
+          .limit(1)
+          .single();
 
-    let durationMinutes = 30;
-    if (service_id) {
-      const { data: service } = await supabase
-        .from('services')
-        .select('duration_minutes')
-        .eq('id', service_id)
-        .single();
-      if (service?.duration_minutes) {
-        durationMinutes = service.duration_minutes;
+        const clinicInfo = clinicData || {
+          name: "Clínica Dental Elite",
+          city: "Tallin",
+          country: "Estonia",
+          address: "Oficina Central"
+        };
+
+        // 2. Obtener historial previo de la conversación ANTES de insertar el nuevo mensaje
+        const { data: history } = await supabase
+          .from('chat_messages')
+          .select('role, content')
+          .eq('phone_number', fromNumber)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        const formattedHistory = (history || [])
+          .reverse()
+          .map(msg => ({ role: msg.role, content: msg.content }));
+
+        // 3. Guardar el mensaje entrante del usuario en Supabase
+        await supabase.from('chat_messages').insert([
+          { phone_number: fromNumber, role: 'user', content: messageText }
+        ]);
+
+        // Añadir el mensaje actual al historial que verá OpenAI
+        formattedHistory.push({ role: 'user', content: messageText });
+
+        // 4. Consultar respuesta con OpenAI pasando el historial completo y datos de la sucursal
+        const botReply = await getOpenAIResponse(formattedHistory, fromNumber, clinicInfo);
+
+        // 5. Guardar la respuesta del asistente en Supabase
+        await supabase.from('chat_messages').insert([
+          { phone_number: fromNumber, role: 'assistant', content: botReply }
+        ]);
+
+        // 6. Enviar respuesta de vuelta a WhatsApp
+        await sendWhatsAppMessage(fromNumber, botReply);
       }
     }
 
-    const startMin = timeToMinutes(start_time);
-    const endMin = startMin + durationMinutes;
-    const end_time = minutesToTime(endMin);
+    return NextResponse.json({ status: 'ok' }, { status: 200 });
+  } catch (error) {
+    console.error('Error en webhook de WhatsApp:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
 
-    const { data: existingAppts } = await supabase
-      .from('appointments')
-      .select('start_time, end_time')
-      .eq('date', date)
-      .neq('status', 'cancelled');
+// Función para interactuar con OpenAI adaptada por ubicación y región
+async function getOpenAIResponse(messagesHistory, phoneNumber, clinic) {
+  if (!openaiApiKey) {
+    return `Hola, gracias por escribir a ${clinic.name}. ¿En qué podemos ayudarte hoy?`;
+  }
 
-    const isConflict = (existingAppts || []).some(appt => {
-      const existingStart = timeToMinutes(appt.start_time);
-      const existingEnd = timeToMinutes(appt.end_time);
-      return startMin < existingEnd && endMin > existingStart;
+  const fechaHoy = new Date().toISOString().split('T')[0];
+
+  const systemPrompt = `Eres el asistente virtual experto de "${clinic.name}", ubicada en ${clinic.city}, ${clinic.country} (${clinic.address}). 
+  LA FECHA DE HOY ES: ${fechaHoy}. Ten en cuenta estrictamente esta fecha actual para validar cualquier día, año o cita que solicite el usuario (no inventes años pasados ni futuros lejanos).
+  Atendemos en el horario local de la sucursal. Ofrecemos servicios de limpieza dental, blanqueamiento, ortodoncia, endodoncia e implantes.
+  Sé amable, profesional y conciso. RECUERDA SIEMPRE EL NOMBRE DEL USUARIO Y EL CONTEXTO DE LA CONVERSACIÓN PREVIA.
+  
+  CONTEXTO LEGAL Y PRIVACIDAD:
+  Operas bajo las pautas de privacidad de ${clinic.country}. Antes de agendar, asegúrate de informar al paciente de manera amigable que sus datos serán tratados para la gestión de su cita conforme a las normativas locales aplicables, y pídele su conformidad.
+
+  SI el usuario quiere agendar una cita y ya dio su consentimiento, pídele obligatoriamente su nombre completo, la fecha deseada (formato YYYY-MM-DD) y la hora (formato HH:MM). 
+  Una vez que te dé esos datos, responde confirmando la cita y añade al final de tu respuesta un bloque oculto exactamente con este formato JSON:
+  [BOOKING_DATA]{"customer_name": "Nombre", "customer_phone": "${phoneNumber}", "date": "YYYY-MM-DD", "start_time": "HH:MM"}[/BOOKING_DATA]`;
+
+  try {
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...messagesHistory
+    ];
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: messages,
+        temperature: 0.7,
+      }),
     });
 
-    if (isConflict) {
-      return NextResponse.json({
-        success: false,
-        error: "El horario seleccionado ya no se encuentra disponible."
-      }, { status: 409 });
-    }
+    const data = await response.json();
+    let replyText = data.choices?.[0]?.message?.content || `¡Hola! Bienvenido a ${clinic.name}. ¿En qué puedo ayudarte?`;
 
-    let customerId = null;
-    const { data: existingCustomer } = await supabase
-      .from('customers')
-      .select('id')
-      .eq('phone', customer_phone)
-      .maybeSingle();
+    // Detección automática para agendar y hacer fetch a la API interna
+    const bookingMatch = replyText.match(/\[BOOKING_DATA\]([\s\S]*?)\[\/BOOKING_DATA\]/);
+    
+    if (bookingMatch) {
+      try {
+        const bookingJson = JSON.parse(bookingMatch[1]);
+        
+        const host = process.env.NEXT_PUBLIC_SITE_URL || 'https://github-com-new-blond.vercel.app';
+        const bookingResponse = await fetch(`${host}/api/public/book`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bookingJson)
+        });
 
-    if (existingCustomer) {
-      customerId = existingCustomer.id;
-    } else {
-      const { data: newCustomer, error: createCustomerErr } = await supabase
-        .from('customers')
-        .insert([{ name: customer_name, phone: customer_phone, email: customer_email || null }])
-        .select()
-        .single();
+        const bookingResult = await bookingResponse.json();
 
-      if (createCustomerErr) {
-        return NextResponse.json({ error: "Error al registrar cliente", detail: createCustomerErr.message }, { status: 500 });
+        if (bookingResult.success) {
+          replyText = replyText.replace(/\[BOOKING_DATA\][\s\S]*?\[\/BOOKING_DATA\]/, '').trim();
+          replyText += "\n\n✅ ¡Listo! Tu cita ha quedado registrada correctamente en nuestro sistema.";
+        } else {
+          replyText = replyText.replace(/\[BOOKING_DATA\][\s\S]*?\[\/BOOKING_DATA\]/, '').trim();
+          replyText += `\n\n⚠️ Hubo un detalle al agendar: ${bookingResult.error || 'El horario ya no está disponible.'}`;
+        }
+      } catch (parseErr) {
+        console.error('Error procesando el JSON de reserva:', parseErr);
       }
-      customerId = newCustomer.id;
     }
 
-    const { data: appointment, error: apptError } = await supabase
-      .from('appointments')
-      .insert([{
-        customer_id: customerId,
-        staff_id: staff_id || null,
-        service_id: service_id || null,
-        date: date,
-        start_time: start_time,
-        end_time: end_time,
-        status: 'confirmed'
-      }])
-      .select()
-      .single();
-
-    if (apptError) {
-      return NextResponse.json({ error: "Error al registrar la cita", detail: apptError.message }, { status: 500 });
-    }
-
-    return NextResponse.json({
-      success: true,
-      mensaje: "Cita agendada con éxito",
-      reserva: {
-        id: appointment.id,
-        cliente: customer_name,
-        telefono: customer_phone,
-        fecha: date,
-        hora_inicio: start_time,
-        hora_fin: end_time,
-        estado: appointment.status
-      }
-    }, { status: 201 });
-
+    return replyText;
   } catch (err) {
-    return NextResponse.json({ error: "Error interno del servidor", detail: err.message }, { status: 500 });
+    console.error('Error con OpenAI:', err);
+    return "Lo siento, tuve un pequeño problema técnico, pero ya estoy aquí. ¿Cómo te gustaría que te ayude?";
   }
+}
+
+// Función para enviar mensajes vía Meta WhatsApp API
+async function sendWhatsAppMessage(to, text) {
+  const token = process.env.WHATSAPP_TOKEN;
+  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  if (!token || !phoneId) return;
+
+  return await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: to,
+      type: 'text',
+      text: { body: text },
+    }),
+  });
 }
