@@ -77,7 +77,7 @@ export async function POST(request) {
         formattedHistory.push({ role: 'user', content: messageText });
 
         // 4. Consultar respuesta con OpenAI pasando el historial completo y datos de la sucursal
-        const botReply = await getOpenAIResponse(formattedHistory, fromNumber, clinicInfo);
+        const botReply = await getOpenAIResponse(formattedHistory, fromNumber, clinicInfo, supabase);
 
         // 5. Guardar la respuesta del asistente en Supabase
         await supabase.from('chat_messages').insert([
@@ -96,8 +96,8 @@ export async function POST(request) {
   }
 }
 
-// Función para interactuar con OpenAI adaptada por ubicación y región
-async function getOpenAIResponse(messagesHistory, phoneNumber, clinic) {
+// Función para interactuar con OpenAI y registrar la cita directamente en Supabase
+async function getOpenAIResponse(messagesHistory, phoneNumber, clinic, supabase) {
   if (!openaiApiKey) {
     return `Hola, gracias por escribir a ${clinic.name}. ¿En qué podemos ayudarte hoy?`;
   }
@@ -138,28 +138,31 @@ async function getOpenAIResponse(messagesHistory, phoneNumber, clinic) {
     const data = await response.json();
     let replyText = data.choices?.[0]?.message?.content || `¡Hola! Bienvenido a ${clinic.name}. ¿En qué puedo ayudarte?`;
 
-    // Detección automática para agendar y hacer fetch a la API interna
+    // Detección automática para agendar directo en Supabase
     const bookingMatch = replyText.match(/\[BOOKING_DATA\]([\s\S]*?)\[\/BOOKING_DATA\]/);
     
     if (bookingMatch) {
       try {
         const bookingJson = JSON.parse(bookingMatch[1]);
         
-        const host = process.env.NEXT_PUBLIC_SITE_URL || 'https://github-com-new-blond.vercel.app';
-        const bookingResponse = await fetch(`${host}/api/public/book`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(bookingJson)
-        });
+        // Inserción directa en la tabla appointments
+        const { error: dbError } = await supabase.from('appointments').insert([
+          {
+            date: bookingJson.date,
+            time: bookingJson.start_time,
+            status: 'scheduled',
+            duration_minutes: 30,
+            price: 250.00
+          }
+        ]);
 
-        const bookingResult = await bookingResponse.json();
-
-        if (bookingResult.success) {
+        if (!dbError) {
           replyText = replyText.replace(/\[BOOKING_DATA\][\s\S]*?\[\/BOOKING_DATA\]/, '').trim();
           replyText += "\n\n✅ ¡Listo! Tu cita ha quedado registrada correctamente en nuestro sistema.";
         } else {
+          console.error('Error al registrar la cita en Supabase:', dbError);
           replyText = replyText.replace(/\[BOOKING_DATA\][\s\S]*?\[\/BOOKING_DATA\]/, '').trim();
-          replyText += `\n\n⚠️ Hubo un detalle al agendar: ${bookingResult.error || 'El horario ya no está disponible.'}`;
+          replyText += `\n\n⚠️ Hubo un detalle al registrar la cita en la base de datos.`;
         }
       } catch (parseErr) {
         console.error('Error procesando el JSON de reserva:', parseErr);
