@@ -10,16 +10,17 @@ export async function GET(request) {
   const mode = searchParams.get('hub.mode');
   const token = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
-  const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'clinicadental123';
+  
+  const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'gocuesta_2026';
 
-  if (mode && token) {
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      return new Response(challenge, { status: 200 });
-    } else {
-      return new Response('Forbidden', { status: 403 });
-    }
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    return new Response(challenge, {
+      status: 200,
+      headers: { 'Content-Type': 'text/plain' },
+    });
   }
-  return new Response('Bad Request', { status: 400 });
+  
+  return new Response('Forbidden', { status: 403 });
 }
 
 export async function POST(request) {
@@ -47,8 +48,8 @@ export async function POST(request) {
           .single();
 
         const clinicInfo = clinicData || {
-          name: "Clínica Dental",
-          city: "Tallin",
+          name: "GoCuesta Clinic",
+          city: "Tallinn",
           country: "Estonia"
         };
 
@@ -92,7 +93,7 @@ async function getOpenAIResponseWithTools(messagesHistory, phoneNumber, clinic, 
   }
 
   const today = new Date();
-  const fechaHoyStr = today.toISOString().split('T')[0]; // Ej: 2026-09-22
+  const fechaHoyStr = today.toISOString().split('T')[0];
 
   try {
     const { data: servicesData } = await supabase
@@ -116,15 +117,15 @@ async function getOpenAIResponseWithTools(messagesHistory, phoneNumber, clinic, 
     const systemPrompt = `Eres la recepcionista humana de "${clinic.name}". Estás chateando por WhatsApp.
     
     REGLAS DE COMPORTAMIENTO HUMANO:
-    - Escribe como una persona real en WhatsApp: mensajes cortos, cercanos, naturales, sin formato de robot (nada de negritas exageradas, viñetas formales ni párrafos largos).
-    - HOY es estrictamente: ${fechaHoyStr}. Si te piden fechas futuras (mes que viene, diciembre o enero de 2027), calcúlalas bien en formato YYYY-MM-DD sin usar años pasados.
-    - No hagas cuestionarios ni muchas preguntas a la vez. Ve fluyendo con la plática. Si te falta un dato para la cita, pídelo de forma casual.
+    - Escribe como una persona real en WhatsApp: mensajes cortos, cercanos, naturales, sin formato de robot.
+    - HOY es estrictamente: ${fechaHoyStr}. Si te piden fechas futuras, calcúlalas bien en formato YYYY-MM-DD.
+    - No hagas cuestionarios ni muchas preguntas a la vez. Ve fluyendo con la plática.
     - Cuando ya tengas clara la fecha, la hora y el nombre, ejecuta de inmediato la herramienta 'registrar_cita' y despídete natural.
 
     SERVICIOS:
     ${servicesText}
 
-    CITAS YA OCUPADAS (para no cruzar horarios):
+    CITAS YA OCUPADAS:
     ${bookedSlotsText}`;
 
     const messages = [
@@ -137,7 +138,7 @@ async function getOpenAIResponseWithTools(messagesHistory, phoneNumber, clinic, 
         type: "function",
         function: {
           name: "registrar_cita",
-          description: `Registra una cita en Supabase. OBLIGATORIO: Usa la fecha actual (${fechaHoyStr}) o calcula el día exacto que pidió el cliente, pero el año DEBE ser estrictamente 2026 o superior. Nunca uses 2023.`,
+          description: `Registra una cita en Supabase. OBLIGATORIO: Usa la fecha actual (${fechaHoyStr}) o calcula el día exacto que pidió el cliente, pero el año DEBE ser estrictamente 2026 o superior.`,
           parameters: {
             type: "object",
             properties: {
@@ -145,7 +146,7 @@ async function getOpenAIResponseWithTools(messagesHistory, phoneNumber, clinic, 
               service_name: { type: "string", description: "Servicio que solicitó" },
               date: { 
                 type: "string", 
-                description: `Fecha exacta de la cita en formato YYYY-MM-DD. Hoy es ${fechaHoyStr}. Si es mañana, suma un día a esta fecha exacta.` 
+                description: `Fecha exacta de la cita en formato YYYY-MM-DD. Hoy es ${fechaHoyStr}.` 
               },
               start_time: { type: "string", description: "Hora en formato HH:MM (ej. 16:00)" }
             },
@@ -178,7 +179,6 @@ async function getOpenAIResponseWithTools(messagesHistory, phoneNumber, clinic, 
       if (toolCall.function.name === 'registrar_cita') {
         const args = JSON.parse(toolCall.function.arguments);
 
-        // --- FILTRO ANTIALUCINACIÓN ESTRICTO ---
         let finalDate = args.date;
         if (!finalDate || finalDate.includes('2023') || finalDate.includes('2024') || finalDate.includes('2025')) {
           finalDate = fechaHoyStr; 
