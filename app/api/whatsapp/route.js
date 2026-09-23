@@ -25,7 +25,6 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const body = await request.json();
-    console.log("WEBHOOK BODY RECIBIDO:", JSON.stringify(body, null, 2));
     
     if (
       body.object &&
@@ -48,10 +47,9 @@ export async function POST(request) {
           .single();
 
         const clinicInfo = clinicData || {
-          name: "Clínica Dental Elite",
+          name: "Clínica Dental",
           city: "Tallin",
-          country: "Estonia",
-          address: "Oficina Central"
+          country: "Estonia"
         };
 
         const { data: history } = await supabase
@@ -71,7 +69,7 @@ export async function POST(request) {
 
         formattedHistory.push({ role: 'user', content: messageText });
 
-        const botReply = await getOpenAIResponse(formattedHistory, fromNumber, clinicInfo);
+        const botReply = await getOpenAIResponseWithTools(formattedHistory, fromNumber, clinicInfo, supabase);
 
         await supabase.from('chat_messages').insert([
           { phone_number: fromNumber, role: 'assistant', content: botReply }
@@ -83,31 +81,78 @@ export async function POST(request) {
 
     return NextResponse.json({ status: 'ok' }, { status: 200 });
   } catch (error) {
-    console.error('Error crítico en webhook de WhatsApp:', error);
+    console.error('Error en webhook de WhatsApp:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
 
-async function getOpenAIResponse(messagesHistory, phoneNumber, clinic) {
+async function getOpenAIResponseWithTools(messagesHistory, phoneNumber, clinic, supabase) {
   if (!openaiApiKey) {
-    return `Hola, gracias por escribir a ${clinic.name}. ¿En qué podemos ayudarte hoy?`;
+    return `¡Hola! ¿Qué tal? ¿En qué te puedo ayudar hoy?`;
   }
 
-  const systemPrompt = `Eres el asistente virtual experto de "${clinic.name}", ubicada en ${clinic.city}, ${clinic.country} (${clinic.address}). 
-  Atendemos en el horario local de la sucursal. Ofrecemos servicios de limpieza dental, blanqueamiento, ortodoncia, endodoncia e implantes.
-  Sé amable, profesional y conciso. RECUERDA SIEMPRE EL NOMBRE DEL USUARIO Y EL CONTEXTO DE LA CONVERSACIÓN PREVIA.
-  
-  CONTEXTO LEGAL Y PRIVACIDAD:
-  Operas bajo las pautas de privacidad de ${clinic.country}. Antes de agendar, asegúrate de informar al paciente de manera amigable que sus datos serán tratados para la gestión de su cita conforme a las normativas locales aplicables, y pídele su conformidad.
-
-  SI el usuario quiere agendar una cita y ya dio su consentimiento, pídele obligatoriamente su nombre completo, la fecha deseada (formato YYYY-MM-DD) y la hora (formato HH:MM). 
-  Una vez que te dé esos datos, responde confirmando la cita y añade al final de tu respuesta un bloque oculto exactamente con este formato JSON:
-  [BOOKING_DATA]{"customer_name": "Nombre", "customer_phone": "${phoneNumber}", "date": "YYYY-MM-DD", "start_time": "HH:MM"}[/BOOKING_DATA]`;
+  const today = new Date();
+  const fechaHoyStr = today.toISOString().split('T')[0]; // Ej: 2026-09-22
 
   try {
+    const { data: servicesData } = await supabase
+      .from('services')
+      .select('name, price, duration_minutes');
+
+    const servicesText = servicesData && servicesData.length > 0
+      ? servicesData.map(s => `- ${s.name} ($${s.price}, ${s.duration_minutes} mins)`).join('\n')
+      : '- Limpieza Dental ($250)';
+
+    const { data: existingAppointments } = await supabase
+      .from('appointments')
+      .select('date, time, status')
+      .gte('date', fechaHoyStr)
+      .neq('status', 'cancelled');
+
+    const bookedSlotsText = existingAppointments && existingAppointments.length > 0
+      ? existingAppointments.map(app => `- ${app.date} a las ${app.time}`).join('\n')
+      : 'Sin citas ocupadas por el momento.';
+
+    const systemPrompt = `Eres la recepcionista humana de "${clinic.name}". Estás chateando por WhatsApp.
+    
+    REGLAS DE COMPORTAMIENTO HUMANO:
+    - Escribe como una persona real en WhatsApp: mensajes cortos, cercanos, naturales, sin formato de robot (nada de negritas exageradas, viñetas formales ni párrafos largos).
+    - HOY es estrictamente: ${fechaHoyStr}. Si te piden fechas futuras (mes que viene, diciembre o enero de 2027), calcúlalas bien en formato YYYY-MM-DD sin usar años pasados.
+    - No hagas cuestionarios ni muchas preguntas a la vez. Ve fluyendo con la plática. Si te falta un dato para la cita, pídelo de forma casual.
+    - Cuando ya tengas clara la fecha, la hora y el nombre, ejecuta de inmediato la herramienta 'registrar_cita' y despídete natural.
+
+    SERVICIOS:
+    ${servicesText}
+
+    CITAS YA OCUPADAS (para no cruzar horarios):
+    ${bookedSlotsText}`;
+
     const messages = [
       { role: 'system', content: systemPrompt },
       ...messagesHistory
+    ];
+
+    const tools = [
+      {
+        type: "function",
+        function: {
+          name: "registrar_cita",
+          description: `Registra una cita en Supabase. OBLIGATORIO: Usa la fecha actual (${fechaHoyStr}) o calcula el día exacto que pidió el cliente, pero el año DEBE ser estrictamente 2026 o superior. Nunca uses 2023.`,
+          parameters: {
+            type: "object",
+            properties: {
+              customer_name: { type: "string", description: "Nombre de la persona" },
+              service_name: { type: "string", description: "Servicio que solicitó" },
+              date: { 
+                type: "string", 
+                description: `Fecha exacta de la cita en formato YYYY-MM-DD. Hoy es ${fechaHoyStr}. Si es mañana, suma un día a esta fecha exacta.` 
+              },
+              start_time: { type: "string", description: "Hora en formato HH:MM (ej. 16:00)" }
+            },
+            required: ["customer_name", "service_name", "date", "start_time"]
+          }
+        }
+      }
     ];
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -119,56 +164,59 @@ async function getOpenAIResponse(messagesHistory, phoneNumber, clinic) {
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: messages,
-        temperature: 0.7,
+        tools: tools,
+        tool_choice: "auto",
+        temperature: 0.5,
       }),
     });
 
     const data = await response.json();
-    let replyText = data.choices?.[0]?.message?.content || `¡Hola! Bienvenido a ${clinic.name}. ¿En qué puedo ayudarte?`;
+    const responseMessage = data.choices?.[0]?.message;
 
-    const bookingMatch = replyText.match(/\[BOOKING_DATA\]([\s\S]*?)\[\/BOOKING_DATA\]/);
-    
-    if (bookingMatch) {
-      try {
-        const bookingJson = JSON.parse(bookingMatch[1]);
-        
-        const host = process.env.NEXT_PUBLIC_SITE_URL || 'https://github-com-new-blond.vercel.app';
-        const bookingResponse = await fetch(`${host}/api/public/book`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(bookingJson)
-        });
+    if (responseMessage?.tool_calls) {
+      const toolCall = responseMessage.tool_calls[0];
+      if (toolCall.function.name === 'registrar_cita') {
+        const args = JSON.parse(toolCall.function.arguments);
 
-        const bookingResult = await bookingResponse.json();
-
-        if (bookingResult.success) {
-          replyText = replyText.replace(/\[BOOKING_DATA\][\s\S]*?\[\/BOOKING_DATA\]/, '').trim();
-          replyText += "\n\n✅ ¡Listo! Tu cita ha quedado registrada correctamente en nuestro sistema.";
-        } else {
-          replyText = replyText.replace(/\[BOOKING_DATA\][\s\S]*?\[\/BOOKING_DATA\]/, '').trim();
-          replyText += `\n\n⚠️ Hubo un detalle al agendar: ${bookingResult.error || 'El horario ya no está disponible.'}`;
+        // --- FILTRO ANTIALUCINACIÓN ESTRICTO ---
+        let finalDate = args.date;
+        if (!finalDate || finalDate.includes('2023') || finalDate.includes('2024') || finalDate.includes('2025')) {
+          finalDate = fechaHoyStr; 
         }
-      } catch (parseErr) {
-        console.error('Error procesando el JSON de reserva:', parseErr);
+
+        const { error: dbError } = await supabase.from('appointments').insert([
+          {
+            date: finalDate,
+            time: args.start_time,
+            duration_minutes: 30,
+            price: 250.00,
+            status: 'scheduled'
+          }
+        ]);
+
+        if (!dbError) {
+          return `¡Listo ${args.customer_name}! Ya te agendé para el ${finalDate} a las ${args.start_time}. ¡Por ahí te esperamos! 😊`;
+        } else {
+          console.error('Error en Supabase:', dbError);
+          return `Oye ${args.customer_name}, tuve un pequeño detalle al guardar en el sistema, déjame checarlo un segundo.`;
+        }
       }
     }
 
-    return replyText;
+    return responseMessage?.content || `¡Hola! ¿Qué tal? ¿En qué te puedo ayudar?`;
+
   } catch (err) {
-    console.error('Error con OpenAI:', err);
-    return "Lo siento, tuve un pequeño problema técnico, pero ya estoy aquí. ¿Cómo te gustaría que te ayude?";
+    console.error('Error OpenAI Tools:', err);
+    return "Hola, discúlpame, se me trabó tantito el chat. ¿En qué estábamos?";
   }
 }
 
 async function sendWhatsAppMessage(to, text) {
   const token = process.env.WHATSAPP_TOKEN;
   const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  if (!token || !phoneId) {
-    console.error("Faltan las credenciales WHATSAPP_TOKEN o WHATSAPP_PHONE_NUMBER_ID");
-    return;
-  }
+  if (!token || !phoneId) return;
 
-  const res = await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
+  return await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -181,8 +229,4 @@ async function sendWhatsAppMessage(to, text) {
       text: { body: text },
     }),
   });
-
-  const resData = await res.json();
-  console.log("Respuesta de Meta al enviar mensaje:", resData);
-  return res;
 }

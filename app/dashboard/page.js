@@ -1,439 +1,689 @@
 'use client';
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
 
-export default function Dashboard() {
-  const router = useRouter();
-  const [activeTab, setActiveTab] = useState('citas');
-  const [selectedCurrency, setSelectedCurrency] = useState('EUR');
+import React, { useState, useEffect } from 'react';
+import { 
+  Calendar, Clock, User, Plus, Phone, MessageSquare, CheckCircle, 
+  XCircle, Search, Bot, Globe, ChevronLeft, ChevronRight, Sparkles, 
+  Settings, Trash2, Edit3, Activity, Zap, ArrowRight, ShieldCheck,
+  Check, Play, Users, DollarSign
+} from 'lucide-react';
 
-  // Datos simulados
-  const [services, setServices] = useState([
-    { id: 1, name: 'core', price: '9', duration: '30' }
+// --- CUSTOM HOOK PARA LOCALSTORAGE (SSR Safe) ---
+function useLocalStorage(key, initialValue) {
+  const [value, setValue] = useState(() => {
+    if (typeof window === 'undefined') return initialValue;
+    try {
+      const item = window.localStorage.getItem(key);
+      return item ? JSON.parse(item) : initialValue;
+    } catch (error) {
+      return initialValue;
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    }
+  }, [key, value]);
+
+  return [value, setValue];
+}
+
+export default function AutonomousCRM() {
+  // --- ESTADOS PERSISTENTES ---
+  const [lang, setLang] = useLocalStorage('crm_lang', 'ES');
+  const [step, setStep] = useLocalStorage('crm_step', 'landing'); // 'landing', 'auth', 'crm'
+  const [onboardingStep, setOnboardingStep] = useState(1);
+  const [businessInfo, setBusinessInfo] = useLocalStorage('crm_biz', {
+    name: 'Clínica Estética Cuesta', 
+    phone: '+34 600 000 000',
+    email: 'contacto@gocuesta.com', 
+    currency: 'EUR', 
+    hoursStart: '09:00', 
+    hoursEnd: '18:00'
+  });
+  
+  const [services, setServices] = useLocalStorage('crm_services', [
+    { id: '1', name: 'Consulta Evaluación & Diagnóstico', price: '150', duration: '45' },
+    { id: '2', name: 'Tratamiento Avanzado', price: '350', duration: '60' }
   ]);
-  const [newServiceName, setNewServiceName] = useState('');
-  const [newServicePrice, setNewServicePrice] = useState('');
-  const [newServiceDuration, setNewServiceDuration] = useState('30');
+  
+  const [staff, setStaff] = useLocalStorage('crm_staff', [
+    { id: '1', name: 'Dr. Principal' },
+    { id: '2', name: 'Dra. Especialista' }
+  ]);
+  
+  const [clients, setClients] = useLocalStorage('crm_clients', [
+    { id: '1', name: 'Carlos Mendoza', phone: '+34 612 345 678', notes: 'Interesado en tratamiento completo' },
+    { id: '2', name: 'Ana Sofía Rodríguez', phone: '+34 699 888 777', notes: 'Paciente VIP recurrente' }
+  ]);
+  
+  const [appointments, setAppointments] = useLocalStorage('crm_appointments', []);
+  const [automations, setAutomations] = useLocalStorage('crm_automations', {
+    aiVoiceAgent: true, yieldManagement: true, whatsappReminders: true
+  });
 
-  const [staff, setStaff] = useState(['ana', 'pail', 'mmmm']);
-  const [newStaffName, setNewStaffName] = useState('');
+  // --- ESTADOS DE UI TEMPORALES ---
+  const [activeTab, setActiveTab] = useState('appointments'); // appointments, clients, automations, settings
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [calendarMonth, setCalendarMonth] = useState(new Date());
+  const [isApptModalOpen, setIsApptModalOpen] = useState(false);
+  const [editingAppt, setEditingAppt] = useState(null);
+  const [clientSearchTerm, setClientSearchTerm] = useState('');
+  const [toast, setToast] = useState('');
 
-  const addService = () => {
-    if (newServiceName && newServicePrice) {
-      setServices([...services, { id: Date.now(), name: newServiceName, price: newServicePrice, duration: newServiceDuration }]);
-      setNewServiceName('');
-      setNewServicePrice('');
-      setNewServiceDuration('30');
+  // Formularios
+  const [newService, setNewService] = useState({ name: '', price: '', duration: '60' });
+  const [newStaffMember, setNewStaffMember] = useState('');
+  const [apptForm, setApptForm] = useState({
+    clientName: '', clientPhone: '', serviceId: '', staffId: '', date: selectedDate, time: ''
+  });
+
+  // --- TRADUCCIONES (Enfoque High-Ticket / AI Startup) ---
+  const t = {
+    ES: {
+      authTitle: "Plataforma de Operaciones Autónomas",
+      authSubtitle: "Despliega tu IA de reservas y gestión en minutos. Diseñado para Clínicas y Med-Spas.",
+      placeholderBiz: "Ej. Clínica Estética Avanzada",
+      aiActive: "Agente IA En Línea",
+      settings: "Ajustes",
+      saveChanges: "Guardar Cambios",
+      yieldManagement: "Yield Management (Relleno de Huecos)",
+      yieldDesc: "La IA detecta cancelaciones y ofrece el horario con tarifa dinámica a clientes recurrentes.",
+      aiVoice: "Agente Telefónico Autónomo",
+      aiVoiceDesc: "Contesta múltiples llamadas simultáneas, negocia horarios y cierra citas directo en el calendario.",
+      duration: "Duración",
+      staff: "Especialista"
+    },
+    EN: {
+      authTitle: "Autonomous Operations Platform",
+      authSubtitle: "Deploy your AI booking & management engine in minutes. Built for Clinics & Med-Spas.",
+      placeholderBiz: "e.g., Advanced Aesthetic Clinic",
+      aiActive: "AI Agent Online",
+      settings: "Settings",
+      saveChanges: "Save Changes",
+      yieldManagement: "Yield Management (Gap Filling)",
+      yieldDesc: "AI detects cancellations and offers the slot with dynamic pricing to recurring clients.",
+      aiVoice: "Autonomous Voice Agent",
+      aiVoiceDesc: "Handles multiple concurrent calls, negotiates times, and closes bookings into the calendar.",
+      duration: "Duration",
+      staff: "Specialist"
     }
+  }[lang];
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
+
+  // --- MOTOR DE DISPONIBILIDAD (Bloqueo por Staff y Duración) ---
+  const timeToMinutes = (timeStr) => {
+    if (!timeStr) return 0;
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + m;
   };
 
-  const addStaff = () => {
-    if (newStaffName.trim()) {
-      setStaff([...staff, newStaffName.trim()]);
-      setNewStaffName('');
-    }
+  const minutesToTime = (mins) => {
+    const h = Math.floor(mins / 60).toString().padStart(2, '0');
+    const m = (mins % 60).toString().padStart(2, '0');
+    return `${h}:${m}`;
   };
 
-  return (
-    <main className="min-h-screen bg-[#f8f9fa] text-slate-800 font-sans pb-16">
+  const getAvailableSlots = (date, staffId, serviceId) => {
+    if (!date || !staffId || !serviceId) return [];
+    const service = services.find(s => s.id === serviceId);
+    if (!service) return [];
+    
+    const durationMins = parseInt(service.duration) || 30;
+    const startMins = timeToMinutes(businessInfo.hoursStart);
+    const endMins = timeToMinutes(businessInfo.hoursEnd);
+    
+    // Obtener citas activas de ESTE especialista en ESTE día
+    const activeAppts = appointments.filter(a => 
+      a.date === date && 
+      a.staffId === staffId && 
+      !['cancelled', 'no_show'].includes(a.status) &&
+      a.id !== editingAppt?.id // Excluir la cita actual si estamos editando
+    );
+
+    const slots = [];
+    // Generar intervalos de 30 mins
+    for (let time = startMins; time + durationMins <= endMins; time += 30) {
+      const slotStart = time;
+      const slotEnd = time + durationMins;
       
-      {/* 1. BARRA SUPERIOR (NAVBAR EXACTA A TU CAPTURA) */}
-      <header className="bg-white border-b border-slate-200/80 px-6 py-3 sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          
-          {/* Negocio y Estado IA */}
+      // Verificar solapamiento
+      const isOverlapping = activeAppts.some(appt => {
+        const apptSvc = services.find(s => s.id === appt.serviceId);
+        const apptDuration = apptSvc ? parseInt(apptSvc.duration) : 30;
+        const apptStart = timeToMinutes(appt.time);
+        const apptEnd = apptStart + apptDuration;
+        return (slotStart < apptEnd && slotEnd > apptStart); // Lógica de intersección
+      });
+
+      if (!isOverlapping) slots.push(minutesToTime(time));
+    }
+    return slots;
+  };
+
+  // --- MANEJADORES DE DATOS ---
+  const handleSaveAppt = (e) => {
+    e.preventDefault();
+    const service = services.find(s => s.id === apptForm.serviceId);
+    
+    if (editingAppt) {
+      // Editar
+      setAppointments(appointments.map(a => a.id === editingAppt.id ? {
+        ...a, ...apptForm, price: parseFloat(service?.price || 0)
+      } : a));
+      showToast("Cita actualizada exitosamente. Disponibilidad recalculada.");
+    } else {
+      // Crear nuevo
+      const newApptObj = {
+        id: Date.now().toString(),
+        ...apptForm,
+        price: parseFloat(service?.price || 0),
+        status: 'pending'
+      };
+      setAppointments([...appointments, newApptObj]);
+      
+      // Auto-Guardado de Cliente
+      const clientExists = clients.some(c => c.name.toLowerCase() === apptForm.clientName.toLowerCase());
+      if (!clientExists && apptForm.clientName) {
+        setClients([...clients, { id: Date.now().toString(), name: apptForm.clientName, phone: apptForm.clientPhone, notes: '' }]);
+      }
+      showToast("Cita agendada. Bloqueo de horario activado.");
+    }
+    closeApptModal();
+  };
+
+  const handleDeleteAppt = (id) => {
+    if (window.confirm("¿Eliminar esta cita? El horario se liberará inmediatamente.")) {
+      setAppointments(appointments.filter(a => a.id !== id));
+      showToast("Cita eliminada. Horario liberado.");
+    }
+  };
+
+  const closeApptModal = () => {
+    setIsApptModalOpen(false);
+    setEditingAppt(null);
+    setApptForm({ clientName: '', clientPhone: '', serviceId: '', staffId: '', date: selectedDate, time: '' });
+  };
+
+  const openEditAppt = (appt) => {
+    setEditingAppt(appt);
+    setApptForm({
+      clientName: appt.clientName, clientPhone: appt.clientPhone,
+      serviceId: appt.serviceId, staffId: appt.staffId,
+      date: appt.date, time: appt.time
+    });
+    setIsApptModalOpen(true);
+  };
+
+  // --- COMPONENTES UI AUXILIARES ---
+  const calculateRevenue = () => appointments.filter(a => a.status === 'completed').reduce((sum, a) => sum + (a.price || 0), 0);
+  const activeSlotsToday = appointments.filter(a => a.date === selectedDate && !['cancelled', 'no_show'].includes(a.status));
+
+  // ==========================================
+  // RENDER 1: LANDING PAGE (Misma Paleta Clara)
+  // ==========================================
+  if (step === 'landing') {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] text-gray-900 flex flex-col font-sans">
+        {/* HEADER LANDING */}
+        <header className="bg-white border-b px-8 py-4 flex justify-between items-center sticky top-0 z-30 shadow-sm">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-[#5b7b66] text-white flex items-center justify-center font-bold text-sm">
-              P
+            <div className="w-10 h-10 bg-[#6B8F71] text-white rounded-xl flex items-center justify-center font-bold text-lg shadow-md">
+              <Bot className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-900 leading-tight">perro</h3>
-              <span className="text-[11px] text-[#5b7b66] font-semibold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-[#5b7b66] rounded-full animate-pulse"></span> IA Activa
-              </span>
+              <span className="font-bold text-lg text-gray-900 tracking-tight">GoCuesta</span>
+              <span className="ml-2 text-[10px] bg-[#6B8F71]/10 text-[#6B8F71] font-extrabold px-2 py-0.5 rounded-full uppercase">SaaS IA</span>
             </div>
           </div>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setStep('crm')} className="px-4 py-2 text-xs font-bold text-gray-600 hover:text-gray-900 transition-all">
+              Probar Demo CRM
+            </button>
+            <button onClick={() => setStep('auth')} className="px-5 py-2.5 bg-[#6B8F71] text-white font-bold rounded-xl text-xs hover:bg-[#58775d] transition-all shadow-md flex items-center gap-2">
+              Desplegar Entorno <ArrowRight className="w-4 h-4"/>
+            </button>
+          </div>
+        </header>
 
-          {/* Selector de Pestañas (Pill Central) */}
-          <nav className="bg-slate-100 p-1 rounded-2xl flex items-center gap-1 border border-slate-200/60 text-xs font-semibold">
-            <button
-              onClick={() => setActiveTab('citas')}
-              className={`px-4 py-1.5 rounded-xl transition ${
-                activeTab === 'citas' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              📅 Citas
-            </button>
-            <button
-              onClick={() => setActiveTab('clientes')}
-              className={`px-4 py-1.5 rounded-xl transition ${
-                activeTab === 'clientes' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              👥 Clientes (0)
-            </button>
-            <button
-              onClick={() => setActiveTab('automatizaciones')}
-              className={`px-4 py-1.5 rounded-xl transition ${
-                activeTab === 'automatizaciones' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              🤖 Automatizaciones
-            </button>
-            <button
-              onClick={() => setActiveTab('ajustes')}
-              className={`px-4 py-1.5 rounded-xl transition ${
-                activeTab === 'ajustes' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              ⚙️ Ajustes
-            </button>
-          </nav>
+        {/* HERO LANDING */}
+        <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-16 flex flex-col items-center text-center">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#6B8F71]/10 text-[#6B8F71] text-xs font-bold mb-6">
+            <Sparkles className="w-4 h-4" /> Plataforma de Operaciones Autónomas para Clínicas High-Ticket
+          </div>
 
-          {/* Idioma / Salir */}
-          <div className="flex items-center gap-2">
-            <div className="bg-slate-100 p-1 rounded-xl flex items-center text-[10px] font-bold">
-              <span className="bg-slate-900 text-white px-2 py-0.5 rounded-lg">ES</span>
-              <span className="text-slate-400 px-2 py-0.5">EN</span>
-            </div>
-            <button
-              onClick={() => router.push('/')}
-              className="text-xs text-slate-400 hover:text-slate-600 font-medium ml-2"
-            >
-              Salir
+          <h1 className="text-4xl md:text-6xl font-extrabold text-gray-900 leading-tight max-w-4xl tracking-tight">
+            Gestión de citas y reservas impulsada por <span className="text-[#6B8F71]">Agentes Telefónicos IA</span>
+          </h1>
+
+          <p className="mt-6 text-base md:text-lg text-gray-500 max-w-2xl leading-relaxed">
+            Optimiza la agenda de tu clínica, responde llamadas 24/7 de forma autónoma y recupera cancelaciones mediante automatización inteligente.
+          </p>
+
+          <div className="mt-8 flex flex-wrap gap-4 justify-center">
+            <button onClick={() => setStep('auth')} className="px-8 py-4 bg-[#6B8F71] hover:bg-[#58775d] text-white font-bold rounded-2xl text-sm transition-all shadow-lg flex items-center gap-2">
+              Comenzar Ahora <ArrowRight className="w-5 h-5"/>
+            </button>
+            <button onClick={() => setStep('crm')} className="px-8 py-4 bg-white border border-gray-200 text-gray-700 font-bold rounded-2xl text-sm hover:bg-gray-50 transition-all shadow-sm">
+              Ver CRM en Vivo
             </button>
           </div>
 
+          {/* TARJETAS DE CARACTERÍSTICAS */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full mt-20 text-left">
+            <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm space-y-3">
+              <div className="w-12 h-12 bg-[#6B8F71]/10 text-[#6B8F71] rounded-2xl flex items-center justify-center font-bold">
+                <Bot className="w-6 h-6"/>
+              </div>
+              <h3 className="font-bold text-gray-900 text-base">Agente de Voz Inteligente</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">Atiende llamadas en tiempo real, aclara dudas de tratamientos y agenda citas sin intervención de recepción.</p>
+            </div>
+
+            <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm space-y-3">
+              <div className="w-12 h-12 bg-[#6B8F71]/10 text-[#6B8F71] rounded-2xl flex items-center justify-center font-bold">
+                <Zap className="w-6 h-6"/>
+              </div>
+              <h3 className="font-bold text-gray-900 text-base">Yield Management</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">Detecta cancelaciones al instante y reasigna los huecos libres ofreciendo tarifas dinámicas a clientes VIP.</p>
+            </div>
+
+            <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm space-y-3">
+              <div className="w-12 h-12 bg-[#6B8F71]/10 text-[#6B8F71] rounded-2xl flex items-center justify-center font-bold">
+                <Calendar className="w-6 h-6"/>
+              </div>
+              <h3 className="font-bold text-gray-900 text-base">Bloqueo de Disponibilidad</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">Calcula intervalos exactos según el especialista y la duración de cada procedimiento para evitar solapamientos.</p>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // RENDER 2: AUTH / ONBOARDING
+  // ==========================================
+  if (step === 'auth' || step === 'onboarding') {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] flex flex-col items-center justify-center p-4">
+        <button onClick={() => setStep('landing')} className="mb-6 text-xs font-bold text-gray-500 hover:text-gray-900 transition-colors">
+          ← Volver a la Landing Page
+        </button>
+        <div className="max-w-md w-full bg-white rounded-3xl p-8 shadow-xl space-y-6 border border-gray-100">
+          <div className="text-center">
+            <Activity className="w-12 h-12 text-[#6B8F71] mx-auto mb-4" />
+            <h1 className="text-2xl font-bold text-gray-900">{t.authTitle}</h1>
+            <p className="text-sm text-gray-500 mt-2">{t.authSubtitle}</p>
+          </div>
+          
+          <div className="space-y-4">
+            <input 
+              type="text" 
+              placeholder={t.placeholderBiz} 
+              className="w-full p-3 rounded-xl border focus:ring-2 focus:ring-[#6B8F71] text-sm" 
+              value={businessInfo.name} 
+              onChange={e => setBusinessInfo({...businessInfo, name: e.target.value})} 
+            />
+            <button 
+              onClick={() => { 
+                if(!businessInfo.name) return; 
+                if(services.length === 0) setServices([{id: '1', name: 'Consulta Evaluación', price: '150', duration: '45'}]);
+                if(staff.length === 0) setStaff([{id: '1', name: 'Dr. Principal'}]);
+                setStep('crm'); 
+              }} 
+              className="w-full py-3.5 bg-[#6B8F71] text-white font-bold rounded-xl hover:bg-[#58775d] transition-all shadow-md"
+            >
+              Desplegar Entorno CRM →
+            </button>
+          </div>
         </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // RENDER 3: CRM COMPLETO
+  // ==========================================
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] text-gray-900 flex flex-col font-sans">
+      {/* HEADER */}
+      <header className="bg-white border-b px-6 py-4 flex flex-wrap justify-between items-center gap-4 sticky top-0 z-30">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-gray-900 text-white rounded-xl flex items-center justify-center font-bold text-lg shadow-md">
+            {businessInfo.name.charAt(0) || 'S'}
+          </div>
+          <div>
+            <h1 className="font-bold text-gray-900">{businessInfo.name}</h1>
+            <span className="flex items-center gap-1.5 text-[10px] font-bold text-[#6B8F71] uppercase tracking-wider">
+              <span className="w-2 h-2 rounded-full bg-[#6B8F71] animate-pulse"></span> {t.aiActive}
+            </span>
+          </div>
+        </div>
+
+        <nav className="flex bg-gray-100 p-1 rounded-2xl">
+          {[
+            { id: 'appointments', label: 'Agenda' },
+            { id: 'clients', label: 'Clientes' },
+            { id: 'automations', label: 'Automatizaciones' },
+            { id: 'settings', label: t.settings }
+          ].map(tab => (
+            <button 
+              key={tab.id} 
+              onClick={() => setActiveTab(tab.id)} 
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                activeTab === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        <button onClick={() => setStep('landing')} className="text-xs font-bold text-gray-500 hover:text-gray-900 transition-colors">
+          ← Landing
+        </button>
       </header>
 
-      {/* 2. CONTENIDO SEGÚN LA PESTAÑA SELECCIONADA */}
-      <div className="max-w-5xl mx-auto px-4 pt-8 space-y-6">
+      {/* TOAST */}
+      {toast && (
+        <div className="fixed top-20 right-6 z-50 bg-gray-900 text-white px-5 py-3 rounded-2xl shadow-xl text-xs flex items-center gap-2 border border-gray-700 animate-fade-in-down">
+          <Sparkles className="w-4 h-4 text-[#6B8F71]" /> {toast}
+        </div>
+      )}
 
-        {/* PESTAÑA 1: CITAS Y CALENDARIO */}
-        {activeTab === 'citas' && (
-          <div className="space-y-6">
-            
-            {/* Tarjeta de Calendario */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm space-y-4">
-              <div className="flex justify-between items-center">
-                <h3 className="font-bold text-slate-800 text-sm">Septiembre 2026</h3>
-                <div className="flex items-center gap-2">
-                  <button className="text-xs bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg text-slate-600">‹</button>
-                  <button className="text-xs bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg text-slate-600">›</button>
-                </div>
-              </div>
-
-              <div className="flex gap-2 text-xs">
-                <span className="bg-slate-900 text-white px-3 py-1 rounded-full font-bold">Hoy</span>
-                <span className="text-slate-400 px-3 py-1">Mañana</span>
-              </div>
-
-              {/* Días del Calendario */}
-              <div className="grid grid-cols-7 gap-2 text-center text-xs py-2 text-slate-400 font-medium">
-                <span>Lu</span><span>Ma</span><span>Mi</span><span>Ju</span><span>Vi</span><span>Sá</span><span>Do</span>
-                <span className="py-2 text-slate-700">7</span>
-                <span className="py-2 bg-[#5b7b66] text-white font-bold rounded-xl shadow-sm">8</span>
-                <span className="py-2 text-slate-700">9</span>
-                <span className="py-2 text-slate-700">10</span>
-                <span className="py-2 text-slate-700">11</span>
-                <span className="py-2 text-slate-700">12</span>
-                <span className="py-2 text-slate-700">13</span>
-              </div>
-            </div>
-
-            {/* Tarjeta de Ingresos Verde Musgo */}
-            <div className="bg-[#5b7b66] text-white p-6 rounded-2xl shadow-sm space-y-1">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-100">Ingresos del Día</p>
-              <h2 className="text-3xl font-extrabold">€0 EUR</h2>
-              <p className="text-xs text-emerald-100/80">Se calcula automáticamente con las citas marcadas como Completada.</p>
-            </div>
-
-            {/* Banner Informativo Crema */}
-            <div className="bg-[#fef9e7] border border-[#fde047]/40 p-3.5 rounded-xl text-xs text-amber-900 flex items-center gap-2 font-medium">
-              <span>✨</span>
-              <span>Los nuevos clientes se guardan automáticamente en tu directorio al agendar.</span>
-            </div>
-
-            {/* Sección Agenda del Día */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm space-y-6">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h3 className="font-bold text-slate-900 text-base">Agenda del 2026-09-08</h3>
-                  <p className="text-xs text-slate-400">0 citas agendadas para esta fecha</p>
-                </div>
-                <button className="bg-[#5b7b66] hover:bg-[#4d6957] text-white font-semibold text-xs px-4 py-2.5 rounded-xl transition">
-                  + + Agendar nueva cita
-                </button>
-              </div>
-
-              {/* Estado Vacío */}
-              <div className="py-12 text-center space-y-3 border border-dashed border-slate-200 rounded-xl">
-                <div className="w-10 h-10 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto text-lg">
-                  📅
-                </div>
-                <p className="text-xs font-semibold text-slate-700">¡Todo listo! No hay citas programadas para este día.</p>
-                <button className="bg-[#5b7b66] hover:bg-[#4d6957] text-white font-semibold text-xs px-4 py-2 rounded-xl transition">
-                  + Agendar primera cita
-                </button>
-              </div>
-            </div>
-
-          </div>
-        )}
-
-        {/* PESTAÑA 2: CLIENTES */}
-        {activeTab === 'clientes' && (
-          <div className="space-y-6">
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm flex justify-between items-center">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">Directorio de clientes</h2>
-                <p className="text-xs text-slate-400">Se genera automáticamente desde tus agendamientos.</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="Buscar por nombre o teléfono"
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none w-56"
+      {/* MAIN CONTENT */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        {/* --- TAB: AGENDA --- */}
+        {activeTab === 'appointments' && (
+          <>
+            <div className="lg:col-span-4 space-y-6">
+              {/* Calendario Básico Simplificado */}
+              <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm space-y-2">
+                <label className="text-[11px] font-bold text-gray-500 uppercase">Seleccionar Fecha</label>
+                <input 
+                  type="date" 
+                  value={selectedDate} 
+                  onChange={(e) => setSelectedDate(e.target.value)} 
+                  className="w-full p-3 rounded-xl border text-sm font-bold text-gray-700 focus:ring-2 focus:ring-[#6B8F71]" 
                 />
-                <button className="bg-[#5b7b66] text-white text-xs font-semibold px-4 py-2 rounded-xl hover:bg-[#4d6957]">
-                  + Agregar cliente
+              </div>
+
+              {/* FACTURACIÓN */}
+              <div className="bg-gradient-to-br from-[#6B8F71] to-gray-900 p-6 rounded-3xl text-white shadow-lg space-y-1">
+                <span className="text-[10px] uppercase font-bold text-white/70 tracking-widest">Facturación Total</span>
+                <div className="text-3xl font-extrabold">{calculateRevenue().toLocaleString()} {businessInfo.currency}</div>
+                <p className="text-[11px] text-white/60">Suma total de citas marcadas como completadas.</p>
+              </div>
+            </div>
+
+            <div className="lg:col-span-8 space-y-4">
+              <div className="flex justify-between items-center bg-white p-4 rounded-3xl border shadow-sm">
+                <h2 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-[#6B8F71]"/> Agenda • {selectedDate}
+                </h2>
+                <button 
+                  onClick={() => setIsApptModalOpen(true)} 
+                  className="px-4 py-2 bg-[#6B8F71] hover:bg-[#58775d] text-white text-xs font-bold rounded-xl transition-all shadow-sm"
+                >
+                  + Nueva Cita
                 </button>
               </div>
-            </div>
 
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-16 text-center space-y-3">
-              <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto text-xl">
-                👥
-              </div>
-              <h4 className="text-sm font-bold text-slate-800">Aún no tienes clientes registrados</h4>
-              <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                Se agregarán solos en cuanto agendes una cita, o puedes sumarlos manualmente.
-              </p>
+              {activeSlotsToday.length === 0 ? (
+                <div className="text-center p-10 bg-white rounded-3xl border border-dashed">
+                  <Calendar className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-gray-600">Agenda libre para este día.</p>
+                  <p className="text-xs text-gray-400 mt-1">La IA buscará rellenar huecos automáticamente.</p>
+                </div>
+              ) : (
+                activeSlotsToday.map(appt => {
+                  const service = services.find(s => s.id === appt.serviceId);
+                  const staffMember = staff.find(s => s.id === appt.staffId);
+                  const isCompleted = appt.status === 'completed';
+
+                  return (
+                    <div key={appt.id} className="bg-white p-4 rounded-2xl border shadow-sm flex items-center justify-between group">
+                      <div className="flex gap-4 items-center">
+                        <div className="bg-gray-50 border px-3 py-2 rounded-xl text-center">
+                          <span className="text-sm font-bold text-[#6B8F71]">{appt.time}</span>
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-gray-900 text-sm">{appt.clientName}</h4>
+                          <span className="text-xs text-gray-500">
+                            {service?.name || 'Servicio'} ({service?.duration || '30'}m) • {staffMember?.name || 'Especialista'}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex gap-2 items-center">
+                        {isCompleted ? (
+                          <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-3 py-1 rounded-full border border-emerald-200">
+                            Completada
+                          </span>
+                        ) : (
+                          <button 
+                            onClick={() => setAppointments(appointments.map(a => a.id === appt.id ? {...a, status: 'completed'} : a))} 
+                            className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors" 
+                            title="Marcar Completada"
+                          >
+                            <CheckCircle className="w-4 h-4"/>
+                          </button>
+                        )}
+                        <button onClick={() => openEditAppt(appt)} className="p-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors"><Edit3 className="w-4 h-4"/></button>
+                        <button onClick={() => handleDeleteAppt(appt.id)} className="p-2 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition-colors"><Trash2 className="w-4 h-4"/></button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+        )}
+
+        {/* --- TAB: CLIENTES --- */}
+        {activeTab === 'clients' && (
+          <div className="lg:col-span-12 space-y-4">
+            <div className="bg-white p-4 rounded-3xl border shadow-sm flex justify-between items-center">
+              <h2 className="font-bold text-gray-900 text-sm">Directorio de Pacientes</h2>
+              <input 
+                type="text" 
+                placeholder="Buscar cliente..." 
+                value={clientSearchTerm}
+                onChange={e => setClientSearchTerm(e.target.value)}
+                className="p-2 rounded-xl border text-xs w-64"
+              />
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {clients.filter(c => c.name.toLowerCase().includes(clientSearchTerm.toLowerCase())).map(c => (
+                <div key={c.id} className="bg-white p-5 rounded-2xl border shadow-sm space-y-2">
+                  <div className="flex justify-between items-start">
+                    <h4 className="font-bold text-gray-900 text-sm">{c.name}</h4>
+                    <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-bold">Cliente</span>
+                  </div>
+                  <p className="text-xs text-gray-500 flex items-center gap-1.5"><Phone className="w-3.5 h-3.5 text-[#6B8F71]"/> {c.phone}</p>
+                  {c.notes && <p className="text-xs text-gray-500 bg-gray-50 p-2 rounded-lg mt-2">{c.notes}</p>}
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* PESTAÑA 3: AUTOMATIZACIONES */}
-        {activeTab === 'automatizaciones' && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Centro de automatizaciones IA</h2>
-              <p className="text-xs text-slate-400">Deja que la IA se encargue del trabajo repetitivo.</p>
-            </div>
-
-            {/* Configuración de Toggles */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-4 space-y-3">
-              <div className="flex justify-between items-center p-3 border-b border-slate-100">
-                <div className="flex items-center gap-3">
-                  <span className="text-xl">🔔</span>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-800">Recordatorios automáticos por WhatsApp</h4>
-                    <p className="text-[11px] text-slate-400">Envía aviso de confirmación 24h antes de la cita.</p>
+        {/* --- TAB: AUTOMATIZACIONES IA --- */}
+        {activeTab === 'automations' && (
+          <div className="lg:col-span-12 space-y-6">
+            <div className="bg-white p-6 rounded-3xl border shadow-sm grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              <div className="p-5 bg-[#F8F9FA] rounded-2xl border flex gap-4">
+                <div className="p-3 bg-gray-900 text-white rounded-xl h-fit"><Bot className="w-6 h-6"/></div>
+                <div className="flex-1">
+                  <div className="flex justify-between items-center mb-1">
+                    <h4 className="font-bold text-sm text-gray-900">{t.aiVoice}</h4>
+                    <input 
+                      type="checkbox" 
+                      checked={automations.aiVoiceAgent} 
+                      onChange={e => setAutomations({...automations, aiVoiceAgent: e.target.checked})} 
+                      className="accent-[#6B8F71] w-4 h-4"
+                    />
                   </div>
-                </div>
-                <div className="w-10 h-5 bg-[#5b7b66] rounded-full flex items-center justify-end px-0.5 cursor-pointer">
-                  <div className="w-4 h-4 bg-white rounded-full"></div>
+                  <p className="text-xs text-gray-500 leading-relaxed">{t.aiVoiceDesc}</p>
                 </div>
               </div>
 
-              <div className="flex justify-between items-center p-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-xl">📞</span>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-800">Asistente telefónico IA para agendamiento</h4>
-                    <p className="text-[11px] text-slate-400">Atiende llamadas perdidas y agenda directamente en la app.</p>
+              <div className="p-5 bg-[#F8F9FA] rounded-2xl border flex gap-4">
+                <div className="p-3 bg-[#6B8F71] text-white rounded-xl h-fit"><Zap className="w-6 h-6"/></div>
+                <div className="flex-1">
+                  <div className="flex justify-between items-center mb-1">
+                    <h4 className="font-bold text-sm text-gray-900">{t.yieldManagement}</h4>
+                    <input 
+                      type="checkbox" 
+                      checked={automations.yieldManagement} 
+                      onChange={e => setAutomations({...automations, yieldManagement: e.target.checked})} 
+                      className="accent-[#6B8F71] w-4 h-4"
+                    />
                   </div>
-                </div>
-                <div className="w-10 h-5 bg-[#5b7b66] rounded-full flex items-center justify-end px-0.5 cursor-pointer">
-                  <div className="w-4 h-4 bg-white rounded-full"></div>
+                  <p className="text-xs text-gray-500 leading-relaxed">{t.yieldDesc}</p>
                 </div>
               </div>
-            </div>
 
-            {/* Transcripción en Vivo de la IA (Caja Oscura) */}
-            <div className="bg-[#111827] text-white rounded-2xl p-6 space-y-4 shadow-lg">
-              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
-                  <span>📺</span> Transcripción reciente de IA
-                </span>
-                <span className="text-[10px] text-slate-500 font-mono">Ejemplo simulado</span>
-              </div>
-
-              <div className="space-y-3 text-xs">
-                <div className="bg-slate-800/80 p-3 rounded-xl max-w-xs space-y-1">
-                  <span className="text-[10px] text-slate-400 font-semibold block">Cliente</span>
-                  <p className="text-slate-200">Hola, me gustaría agendar un corte para mañana a las 4pm.</p>
-                </div>
-
-                <div className="bg-[#5b7b66]/30 border border-[#5b7b66]/50 p-3 rounded-xl max-w-xs ml-auto space-y-1 text-right">
-                  <span className="text-[10px] text-emerald-300 font-semibold block">IA</span>
-                  <p className="text-emerald-100">¡Claro! Tengo disponible las 4:00 PM. ¿Me das tu nombre?</p>
-                </div>
-
-                <div className="bg-slate-800/80 p-3 rounded-xl max-w-xs space-y-1">
-                  <span className="text-[10px] text-slate-400 font-semibold block">Cliente</span>
-                  <p className="text-slate-200">Carlos Gómez.</p>
-                </div>
-
-                <div className="bg-[#5b7b66]/30 border border-[#5b7b66]/50 p-3 rounded-xl max-w-xs ml-auto space-y-1 text-right">
-                  <span className="text-[10px] text-emerald-300 font-semibold block">IA</span>
-                  <p className="text-emerald-100">¡Listo Carlos! Tu cita quedó agendada y guardada en el sistema.</p>
-                </div>
-              </div>
             </div>
           </div>
         )}
 
-        {/* PESTAÑA 4: AJUSTES EXACTO A TUS CAPTURAS */}
-        {activeTab === 'ajustes' && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Ajustes</h2>
-              <p className="text-xs text-slate-400">Actualiza la información de tu negocio en cualquier momento.</p>
-            </div>
-
-            {/* Información del negocio */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-6 space-y-4 shadow-sm">
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Información del negocio</h3>
-
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">Nombre del negocio</label>
-                  <input
-                    type="text"
-                    defaultValue="perro"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs text-slate-800 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">Correo electrónico</label>
-                  <input
-                    type="email"
-                    defaultValue="oeoeo@gmail.com"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs text-slate-800 focus:outline-none"
-                  />
-                </div>
-
-                {/* Selección de Moneda */}
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">Moneda</label>
+        {/* --- TAB: SETTINGS --- */}
+        {activeTab === 'settings' && (
+          <div className="lg:col-span-12 space-y-6">
+            <div className="bg-white p-6 rounded-3xl border shadow-sm space-y-6">
+              <h2 className="text-lg font-bold flex items-center gap-2 text-gray-900"><Settings className="w-5 h-5 text-[#6B8F71]"/> Configuración del SaaS</h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Info del Negocio */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold text-gray-800 border-b pb-2">Información Base</h3>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-gray-400 block mb-1">Nombre</label>
+                    <input type="text" value={businessInfo.name} onChange={e => setBusinessInfo({...businessInfo, name: e.target.value})} className="w-full p-2.5 border rounded-lg text-sm" placeholder="Nombre" />
+                  </div>
                   <div className="flex gap-2">
-                    {['MXN $', 'USD $', 'EUR €'].map((curr) => (
-                      <button
-                        key={curr}
-                        onClick={() => setSelectedCurrency(curr)}
-                        className={`px-4 py-1.5 rounded-xl text-xs font-bold transition ${
-                          selectedCurrency.includes(curr.split(' ')[0])
-                            ? 'bg-[#5b7b66] text-white'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        {curr}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Horario de Atención */}
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                  <div>
-                    <label className="text-xs text-slate-500 block mb-1">Horario abre</label>
-                    <input
-                      type="text"
-                      defaultValue="09:00 a.m."
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500 block mb-1">Horario cierra</label>
-                    <input
-                      type="text"
-                      defaultValue="07:00 p.m."
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Gestión de Servicios con Duración */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-6 space-y-4 shadow-sm">
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Servicios</h3>
-
-              <div className="space-y-2">
-                {services.map((s) => (
-                  <div key={s.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl text-xs">
-                    <span className="font-semibold text-slate-800">{s.name}</span>
-                    <div className="flex items-center gap-6">
-                      <span className="text-slate-500">{s.price} €</span>
-                      <span className="text-slate-500">{s.duration} min</span>
-                      <button onClick={() => setServices(services.filter(x => x.id !== s.id))} className="text-slate-400 hover:text-red-500">🗑</button>
+                    <div className="flex-1">
+                      <label className="text-[10px] font-bold uppercase text-gray-400 block mb-1">Horario Inicio</label>
+                      <input type="time" value={businessInfo.hoursStart} onChange={e => setBusinessInfo({...businessInfo, hoursStart: e.target.value})} className="w-full p-2 border rounded-lg text-sm" />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-[10px] font-bold uppercase text-gray-400 block mb-1">Horario Cierre</label>
+                      <input type="time" value={businessInfo.hoursEnd} onChange={e => setBusinessInfo({...businessInfo, hoursEnd: e.target.value})} className="w-full p-2 border rounded-lg text-sm" />
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
 
-              <div className="flex gap-2 pt-2">
-                <input
-                  type="text"
-                  placeholder="Nuevo servicio"
-                  value={newServiceName}
-                  onChange={(e) => setNewServiceName(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs flex-1"
-                />
-                <input
-                  type="number"
-                  placeholder="Precio"
-                  value={newServicePrice}
-                  onChange={(e) => setNewServicePrice(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs w-20"
-                />
-                <input
-                  type="number"
-                  placeholder="Min"
-                  value={newServiceDuration}
-                  onChange={(e) => setNewServiceDuration(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs w-20"
-                />
-                <button onClick={addService} className="text-xs font-bold text-[#5b7b66] hover:underline px-2">
-                  + Agregar servicio
-                </button>
+                {/* Servicios */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold text-gray-800 border-b pb-2">Servicios High-Ticket</h3>
+                  {services.map(s => (
+                    <div key={s.id} className="flex gap-2 items-center">
+                      <input type="text" value={s.name} onChange={e => setServices(services.map(ser => ser.id === s.id ? {...ser, name: e.target.value} : ser))} className="flex-1 p-2 border rounded-lg text-xs" />
+                      <input type="number" value={s.price} onChange={e => setServices(services.map(ser => ser.id === s.id ? {...ser, price: e.target.value} : ser))} className="w-20 p-2 border rounded-lg text-xs text-center" />
+                      <button onClick={() => setServices(services.filter(ser => ser.id !== s.id))} className="text-rose-500 hover:text-rose-700"><Trash2 className="w-4 h-4"/></button>
+                    </div>
+                  ))}
+                  <button onClick={() => setServices([...services, {id: Date.now().toString(), name: 'Nuevo Servicio', price: '100', duration: '60'}])} className="text-xs text-[#6B8F71] font-bold">+ Agregar Servicio</button>
+                </div>
               </div>
             </div>
-
-            {/* Personal / Especialistas */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-6 space-y-4 shadow-sm">
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Personal / Especialistas</h3>
-
-              <div className="space-y-2">
-                {staff.map((person, idx) => (
-                  <div key={idx} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl text-xs">
-                    <span className="font-semibold text-slate-800">{person}</span>
-                    <button onClick={() => setStaff(staff.filter((_, i) => i !== idx))} className="text-slate-400 hover:text-red-500">🗑</button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <input
-                  type="text"
-                  placeholder="Nombre de especialista"
-                  value={newStaffName}
-                  onChange={(e) => setNewStaffName(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs flex-1"
-                />
-                <button onClick={addStaff} className="text-xs font-bold text-[#5b7b66] hover:underline px-2">
-                  + Agregar
-                </button>
-              </div>
-            </div>
-
           </div>
         )}
+      </main>
 
-      </div>
-    </main>
+      {/* MODAL CITA / BLOQUEO DINÁMICO */}
+      {isApptModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white max-w-md w-full rounded-3xl p-6 shadow-2xl space-y-4 text-gray-900">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="font-bold text-gray-900 text-sm">{editingAppt ? 'Editar Cita' : 'Agendar & Bloquear Horario'}</h3>
+              <button onClick={closeApptModal} className="text-gray-400 hover:text-gray-600"><XCircle className="w-5 h-5"/></button>
+            </div>
+
+            <form onSubmit={handleSaveAppt} className="space-y-4">
+              <div>
+                <label className="text-[11px] font-bold uppercase text-gray-500">Cliente / Paciente</label>
+                <input 
+                  type="text" 
+                  required 
+                  value={apptForm.clientName} 
+                  onChange={e => setApptForm({...apptForm, clientName: e.target.value})} 
+                  className="w-full p-2.5 border rounded-xl text-sm focus:ring-2 focus:ring-[#6B8F71] mt-1" 
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold uppercase text-gray-500">Servicio</label>
+                  <select 
+                    required 
+                    value={apptForm.serviceId} 
+                    onChange={e => setApptForm({...apptForm, serviceId: e.target.value, time: ''})} 
+                    className="w-full p-2.5 border rounded-xl text-sm mt-1"
+                  >
+                    <option value="">Seleccionar...</option>
+                    {services.map(s => <option key={s.id} value={s.id}>{s.name} ({s.duration}m)</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold uppercase text-gray-500">Especialista</label>
+                  <select 
+                    required 
+                    value={apptForm.staffId} 
+                    onChange={e => setApptForm({...apptForm, staffId: e.target.value, time: ''})} 
+                    className="w-full p-2.5 border rounded-xl text-sm mt-1"
+                  >
+                    <option value="">Seleccionar...</option>
+                    {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold uppercase text-gray-500 block mb-1">
+                  Horarios Disponibles (Autofiltro)
+                </label>
+                <div className="grid grid-cols-4 gap-2 max-h-36 overflow-y-auto pr-1">
+                  {getAvailableSlots(apptForm.date, apptForm.staffId, apptForm.serviceId).length > 0 ? (
+                    getAvailableSlots(apptForm.date, apptForm.staffId, apptForm.serviceId).map(time => (
+                      <button 
+                        type="button" 
+                        key={time} 
+                        onClick={() => setApptForm({...apptForm, time})} 
+                        className={`py-2 text-xs font-bold rounded-lg border transition-all ${
+                          apptForm.time === time 
+                            ? 'bg-[#6B8F71] text-white border-[#6B8F71]' 
+                            : 'hover:border-[#6B8F71] text-gray-700 bg-white'
+                        }`}
+                      >
+                        {time}
+                      </button>
+                    ))
+                  ) : (
+                    <span className="col-span-4 text-xs text-gray-400 italic p-2 text-center">
+                      Selecciona un servicio y especialista para calcular disponibilidad.
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <button 
+                type="submit" 
+                disabled={!apptForm.time} 
+                className="w-full py-3.5 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl text-sm disabled:opacity-50 transition-all mt-4"
+              >
+                {editingAppt ? 'Actualizar Cita' : 'Confirmar & Bloquear'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

@@ -1,921 +1,734 @@
 'use client';
-import { useState } from 'react';
 
-export default function SoftwareDemo() {
-  // PANTALLAS DEL SISTEMA: 'landing' | 'onboarding' | 'whatsapp' | 'dashboard'
-  const [currentStep, setCurrentStep] = useState('landing');
+import React, { useState, useEffect } from 'react';
+import { 
+  Calendar, Clock, User, Plus, Phone, MessageSquare, CheckCircle, 
+  XCircle, Search, Bot, Globe, ChevronLeft, ChevronRight, Sparkles, 
+  Settings, Trash2, Edit3, Activity, Zap, ArrowRight, ShieldCheck,
+  Check, Play, Users, DollarSign, Key, Lock
+} from 'lucide-react';
 
-  // IDIOMA GLOBAL
-  const [lang, setLang] = useState('es');
+function useLocalStorage(key, initialValue) {
+  const [value, setValue] = useState(initialValue);
 
-  // NICHO SELECCIONADO EN LANDING
-  const [selectedNiche, setSelectedNiche] = useState('dentistas');
+  useEffect(() => {
+    try {
+      const item = window.localStorage.getItem(key);
+      if (item !== null) setValue(JSON.parse(item));
+    } catch (error) { console.error(error); }
+  }, [key]);
 
-  // DATOS DEL NEGOCIO
-  const [nombreNegocio, setNombreNegocio] = useState('Clínica Dental Cuesta');
-  const [telefonoWhatsApp, setTelefonoWhatsApp] = useState('+34 600 000 000');
-  const [servicios, setServicios] = useState([
-    { id: '1', nombre: 'Limpieza Dental & Valoración', precio: 50, duracion: '45 min' },
-    { id: '2', nombre: 'Tratamiento Blanqueamiento', precio: 180, duracion: '60 min' }
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch (error) { console.error(error); }
+  }, [key, value]);
+
+  return [value, setValue];
+}
+
+export default function GoCuestaApp() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  // --- ESTADOS PRINCIPALES DE NAVEGACIÓN ---
+  const [lang, setLang] = useLocalStorage('goc_lang', 'ES');
+  const [step, setStep] = useLocalStorage('goc_step', 'landing'); // 'landing', 'pricing', 'onboarding', 'dashboard'
+  const [onboardingSubStep, setOnboardingSubStep] = useLocalStorage('goc_substep', 1); // 1: Registro, 2: Código, 3: Moneda/Horario, 4: Servicios
+
+  // --- DATOS DEL NEGOCIO Y CONFIGURACIÓN ---
+  const [businessInfo, setBusinessInfo] = useLocalStorage('goc_biz', {
+    name: '', email: '', currency: 'EUR', hoursStart: '09:00', hoursEnd: '19:00'
+  });
+  
+  const [verificationCode, setVerificationCode] = useState(['', '', '', '', '', '']);
+  const [newService, setNewService] = useState({ name: '', price: '', duration: '' });
+  
+  const [services, setServices] = useLocalStorage('goc_services', []);
+  const [staff, setStaff] = useLocalStorage('goc_staff', [{ id: '1', name: 'Especialista Principal' }]);
+  const [clients, setClients] = useLocalStorage('goc_clients', [
+    { id: '1', name: 'Carlos Mendoza', phone: '+34 612 345 678', notes: 'Paciente frecuente' }
   ]);
-
-  // ESTADO DEL DASHBOARD
-  const [activeTab, setActiveTab] = useState('citas');
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-
-  // AUTOMATIZACIONES
-  const [automatizaciones, setAutomatizaciones] = useState({
-    whatsappAuto: true,
-    recordatorios24h: true,
-    solicitarReseña: true
+  const [appointments, setAppointments] = useLocalStorage('goc_appointments', []);
+  const [automations, setAutomations] = useLocalStorage('goc_automations', {
+    aiVoiceAgent: true, yieldManagement: true
   });
 
-  // BASE DE DATOS DE CITAS
-  const [citas, setCitas] = useState([
-    {
-      id: '1',
-      cliente: 'Carlos Mendoza',
-      telefono: '+34 612 345 678',
-      servicio: 'Limpieza Dental & Valoración',
-      fecha: new Date().toISOString().split('T')[0],
-      horaInicio: '10:30',
-      horaFin: '11:15',
-      precio: 50,
-      estado: 'completada'
-    },
-    {
-      id: '2',
-      cliente: 'Dra. Andrea Gómez',
-      telefono: '+34 698 765 432',
-      servicio: 'Tratamiento Blanqueamiento',
-      fecha: new Date().toISOString().split('T')[0],
-      horaInicio: '16:00',
-      horaFin: '17:00',
-      precio: 180,
-      estado: 'confirmada'
-    }
-  ]);
+  const [activeTab, setActiveTab] = useState('appointments');
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isApptModalOpen, setIsApptModalOpen] = useState(false);
+  const [apptForm, setApptForm] = useState({ clientName: '', clientPhone: '', serviceId: '', staffId: '', date: selectedDate, time: '' });
+  const [toast, setToast] = useState('');
 
-  // FORMULARIO NUEVA CITA
-  const [nuevaCita, setNuevaCita] = useState({
-    cliente: '',
-    telefono: '',
-    servicio: 'Limpieza Dental & Valoración',
-    fecha: selectedDate,
-    horaInicio: '12:00',
-    horaFin: '12:45',
-    precio: 50,
-    estado: 'confirmada'
-  });
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
-  // CÁLCULOS
-  const citasDelDia = citas.filter(c => c.fecha === selectedDate);
-  const ingresosDelDia = citasDelDia
-    .filter(c => c.estado === 'completada')
-    .reduce((total, c) => total + Number(c.precio || 0), 0);
+  if (!mounted) return <div className="min-h-screen bg-[#0B0F17]" />;
 
-  // ACCIONES DE CITAS
-  const handleCrearCita = (e) => {
-    e.preventDefault();
-    if (!nuevaCita.cliente || !nuevaCita.telefono) return;
-
-    const citaCreada = {
-      ...nuevaCita,
-      id: Date.now().toString(),
-      precio: Number(nuevaCita.precio)
-    };
-
-    setCitas([...citas, citaCreada]);
-    setIsModalOpen(false);
-    setNuevaCita({
-      cliente: '',
-      telefono: '',
-      servicio: 'Limpieza Dental & Valoración',
-      fecha: selectedDate,
-      horaInicio: '12:00',
-      horaFin: '12:45',
-      precio: 50,
-      estado: 'confirmada'
-    });
-  };
-
-  const cambiarEstadoCita = (id, nuevoEstado) => {
-    setCitas(citas.map(c => c.id === id ? { ...c, estado: nuevoEstado } : c));
-  };
-
-  const eliminarCita = (id) => {
-    setCitas(citas.filter(c => c.id !== id));
-  };
-
-  // DESPLAZAMIENTO SUAVE A LOS PLANES
-  const scrollToPlanes = () => {
-    const el = document.getElementById('seccion-planes');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  return (
-    <div className={`min-h-screen font-sans selection:bg-[#587b6a] selection:text-white ${
-      currentStep === 'landing' ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
-    }`}>
-
-      {/* BARRA SUPERIOR DE NAVEGACIÓN (VISIBLE FUERA DE LA LANDING) */}
-      {currentStep !== 'landing' && (
-        <div className="bg-slate-900 border-b border-slate-800 text-white py-2.5 px-4 sticky top-0 z-50">
-          <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#587b6a] animate-pulse"></span>
-              <span className="font-mono text-slate-300 font-semibold uppercase tracking-wider">ENTORNO DE SOFTWARE (VISTA CLIENTE)</span>
+  // ==========================================
+  // 1. LANDING PAGE
+  // ==========================================
+  if (step === 'landing') {
+    return (
+      <div className="min-h-screen bg-[#0B0F17] text-slate-100 flex flex-col font-sans selection:bg-[#6B8F71] selection:text-white">
+        <header className="bg-[#111622]/80 backdrop-blur-md border-b border-slate-800/85 px-8 py-4 flex justify-between items-center sticky top-0 z-30 shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-[#6B8F71] text-white rounded-xl flex items-center justify-center font-bold text-lg shadow-md shadow-[#6B8F71]/20">
+              <Bot className="w-6 h-6" />
             </div>
-            <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
-              <button
-                onClick={() => setCurrentStep('landing')}
-                className="px-3 py-1 rounded-lg font-semibold transition text-slate-300 hover:text-white cursor-pointer"
-              >
-                ← Volver a Landing
-              </button>
-              <button
-                onClick={() => setCurrentStep('onboarding')}
-                className={`px-3 py-1 rounded-lg font-semibold transition cursor-pointer ${
-                  currentStep === 'onboarding' ? 'bg-[#587b6a] text-white' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                1. Registro
-              </button>
-              <button
-                onClick={() => setCurrentStep('whatsapp')}
-                className={`px-3 py-1 rounded-lg font-semibold transition cursor-pointer ${
-                  currentStep === 'whatsapp' ? 'bg-[#587b6a] text-white' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                2. Agente IA
-              </button>
-              <button
-                onClick={() => setCurrentStep('dashboard')}
-                className={`px-3 py-1 rounded-lg font-semibold transition cursor-pointer ${
-                  currentStep === 'dashboard' ? 'bg-[#587b6a] text-white' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                3. Dashboard
-              </button>
+            <div>
+              <span className="font-bold text-lg text-white tracking-tight">GoCuesta</span>
+              <span className="ml-2 text-[10px] bg-[#6B8F71]/20 text-[#6B8F71] font-extrabold px-2 py-0.5 rounded-full uppercase border border-[#6B8F71]/30">IA 🚀</span>
             </div>
           </div>
-        </div>
-      )}
+          <button 
+            onClick={() => {
+              const el = document.getElementById('precios');
+              if(el) el.scrollIntoView({ behavior: 'smooth' });
+            }} 
+            className="px-5 py-2.5 bg-[#6B8F71] text-white font-bold rounded-xl text-xs hover:bg-[#58775d] transition-all shadow-md shadow-[#6B8F71]/20 flex items-center gap-2"
+          >
+            Empezar <ArrowRight className="w-4 h-4"/>
+          </button>
+        </header>
 
-      {/* ========================================================================= */}
-      {/* LANDING PAGE                                                              */}
-      {/* ========================================================================= */}
-      {currentStep === 'landing' && (
-        <div className="space-y-16 pb-20">
-          
-          {/* HEADER NAV */}
-          <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md py-4 px-6 sticky top-0 z-40">
-            <div className="max-w-6xl mx-auto flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-[#587b6a] text-white font-bold flex items-center justify-center text-sm shadow-md shadow-[#587b6a]/20">
-                  C
-                </div>
-                <span className="font-bold text-slate-100 text-base tracking-tight">Cuesta Automation</span>
-              </div>
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={scrollToPlanes}
-                  className="bg-[#587b6a] hover:bg-[#466355] text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-lg shadow-[#587b6a]/25 cursor-pointer active:scale-95"
-                >
-                  Empezar ahora
-                </button>
-              </div>
-            </div>
-          </header>
+        <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-16 flex flex-col items-center text-center">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#6B8F71]/15 border border-[#6B8F71]/30 text-[#88B08E] text-xs font-bold mb-6">
+            <Sparkles className="w-4 h-4 text-[#6B8F71]" /> Agentes Telefónicos y Automatización Inteligente 🤖✨
+          </div>
 
-          {/* HERO SECTION */}
-          <section className="max-w-4xl mx-auto px-4 text-center space-y-6 pt-4">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-[11px] font-medium bg-[#587b6a]/15 text-emerald-300 border border-[#587b6a]/30">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              Agente IA de Agendamiento 24/7 para WhatsApp
-            </div>
+          <h1 className="text-4xl md:text-6xl font-extrabold text-white leading-tight max-w-4xl tracking-tight">
+            Automatiza las reservas de tu negocio con <span className="text-[#6B8F71]">IA Autónoma</span> 📞⚡
+          </h1>
 
-            <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-white tracking-tight leading-tight max-w-3xl mx-auto">
-              Recupera las citas que hoy pierdes por <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-emerald-200 to-[#587b6a]">no responder a tiempo.</span>
-            </h1>
+          <p className="mt-6 text-base md:text-lg text-slate-400 max-w-2xl leading-relaxed">
+            Responde llamadas 24/7, agendan en tu calendario en tiempo real y llena tus espacios libres automáticamente sin esfuerzo manual.
+          </p>
 
-            <p className="text-sm sm:text-base text-slate-400 max-w-xl mx-auto leading-relaxed">
-              Atiende a cada cliente por WhatsApp al instante, responde dudas y agenda citas automáticamente sin contratar más personal.
-            </p>
+          <div className="mt-8">
+            <button 
+              onClick={() => {
+                const el = document.getElementById('precios');
+                if(el) el.scrollIntoView({ behavior: 'smooth' });
+              }} 
+              className="px-8 py-4 bg-[#6B8F71] hover:bg-[#58775d] text-white font-bold rounded-2xl text-sm transition-all shadow-xl shadow-[#6B8F71]/20 flex items-center gap-2 mx-auto"
+            >
+              Empezar Ahora 🚀 <ArrowRight className="w-5 h-5"/>
+            </button>
+          </div>
 
-            {/* CARD ROI */}
-            <div className="max-w-xl mx-auto bg-slate-900/90 border border-[#587b6a]/40 rounded-xl p-4 shadow-xl text-left space-y-1">
-              <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
-                💡 EL SOFTWARE SE PAGA SOLO:
-              </div>
-              <p className="text-xs sm:text-sm font-medium text-slate-200 leading-snug">
-                Con <span className="text-white font-bold underline decoration-[#587b6a] decoration-2">un solo servicio o tratamiento dental recuperado</span> al mes, el sistema cubre su coste. Todo lo demás es margen directo para tu negocio.
-              </p>
+          {/* SECCIÓN DE PRECIOS */}
+          <div id="precios" className="w-full mt-32 pt-10">
+            <div className="text-center mb-12">
+              <span className="text-[11px] font-bold text-[#6B8F71] uppercase tracking-widest">Planes Disponibles 💰</span>
+              <h2 className="text-3xl font-extrabold text-white mt-2">Elige tu paquete y comienza el despliegue</h2>
+              <p className="text-xs text-slate-400 mt-2">Selecciona un plan para iniciar tu proceso de configuración guiada.</p>
             </div>
 
-            <div className="flex justify-center pt-2">
-              <button
-                onClick={scrollToPlanes}
-                className="bg-[#587b6a] hover:bg-[#466355] text-white font-bold text-xs px-8 py-3.5 rounded-xl transition shadow-xl shadow-[#587b6a]/30 cursor-pointer active:scale-95"
-              >
-                Empezar ahora →
-              </button>
-            </div>
-          </section>
-
-          {/* SECTOR SELECTOR */}
-          <section className="max-w-4xl mx-auto px-4 space-y-6">
-            <div className="text-center space-y-1">
-              <h2 className="text-2xl font-bold text-white tracking-tight">
-                Especializado en tu sector
-              </h2>
-              <p className="text-xs text-slate-400">
-                Selecciona tu rubro para ver cómo funciona:
-              </p>
-            </div>
-
-            <div className="flex justify-center gap-2 border-b border-slate-800 pb-3">
-              <button
-                onClick={() => setSelectedNiche('dentistas')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                  selectedNiche === 'dentistas'
-                    ? 'bg-[#587b6a] text-white shadow-md'
-                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                🦷 Clínicas Dentales
-              </button>
-              <button
-                onClick={() => setSelectedNiche('barberias')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                  selectedNiche === 'barberias'
-                    ? 'bg-[#587b6a] text-white shadow-md'
-                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                💈 Barberías
-              </button>
-              <button
-                onClick={() => setSelectedNiche('restaurantes')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                  selectedNiche === 'restaurantes'
-                    ? 'bg-[#587b6a] text-white shadow-md'
-                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                ☕ Cafeterías & Restaurantes
-              </button>
-            </div>
-
-            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 sm:p-6 grid md:grid-cols-2 gap-6 items-center">
-              <div className="space-y-3">
-                {selectedNiche === 'dentistas' && (
-                  <>
-                    <h3 className="text-xl font-bold text-white">Captación Inmediata de Pacientes</h3>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      El primer centro dental que responde se queda con el paciente. El agente cualifica la consulta y asegura la cita al instante.
-                    </p>
-                    <ul className="space-y-1.5 text-xs text-slate-300">
-                      <li className="flex items-center gap-2">✓ Agendamiento automático 24/7.</li>
-                      <li className="flex items-center gap-2">✓ Recordatorios anti-ausencia.</li>
-                    </ul>
-                  </>
-                )}
-
-                {selectedNiche === 'barberias' && (
-                  <>
-                    <h3 className="text-xl font-bold text-white">Agenda Llenas Sin Interrupciones</h3>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      Tus clientes eligen su horario y barbero por WhatsApp mientras tú sigues cortando sin soltar las tijeras.
-                    </p>
-                    <ul className="space-y-1.5 text-xs text-slate-300">
-                      <li className="flex items-center gap-2">✓ Selección de barbero y servicio.</li>
-                      <li className="flex items-center gap-2">✓ Solicitud de reseñas 5 estrellas.</li>
-                    </ul>
-                  </>
-                )}
-
-                {selectedNiche === 'restaurantes' && (
-                  <>
-                    <h3 className="text-xl font-bold text-white">Reservas Confirmadas al Momento</h3>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      Gestiona número de comensales y horarios en horas de máximo trabajo sin saturar la recepción.
-                    </p>
-                    <ul className="space-y-1.5 text-xs text-slate-300">
-                      <li className="flex items-center gap-2">✓ Confirmación automática de mesas.</li>
-                      <li className="flex items-center gap-2">✓ Envío inmediato del menú por chat.</li>
-                    </ul>
-                  </>
-                )}
-
-                <div className="pt-1">
-                  <button
-                    onClick={scrollToPlanes}
-                    className="bg-[#587b6a] hover:bg-[#466355] text-white text-xs font-bold px-5 py-2.5 rounded-xl transition cursor-pointer"
-                  >
-                    Probar en mi negocio →
-                  </button>
-                </div>
-              </div>
-
-              {/* MUESTRA VISUAL ESTÁTICA */}
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2.5 text-xs">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-1.5 text-[10px] text-slate-400">
-                  <span className="font-bold text-slate-200">WhatsApp en tiempo real</span>
-                  <span className="text-emerald-400 font-mono">ACTIVO</span>
-                </div>
-
-                <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 text-slate-200 max-w-[85%]">
-                  <p className="text-[9px] text-slate-500 font-bold">Cliente</p>
-                  {selectedNiche === 'dentistas' && 'Hola, quiero pedir cita para una revisión esta semana.'}
-                  {selectedNiche === 'barberias' && 'Buenas! Tenéis hueco para un corte hoy a las 17:00?'}
-                  {selectedNiche === 'restaurantes' && 'Hola, quisiera reservar para 4 personas este sábado.'}
-                </div>
-
-                <div className="bg-[#587b6a] text-white p-2.5 rounded-xl max-w-[85%] ml-auto shadow-sm">
-                  <p className="text-[9px] text-emerald-100 font-bold">Agente IA</p>
-                  {selectedNiche === 'dentistas' && '¡Hola! Claro. Tengo sitio este Jueves a las 11:00 o Viernes a las 16:30. ¿Cuál prefieres?'}
-                  {selectedNiche === 'barberias' && '¡Hola! Disponible a las 17:30 con Mateo. ¿Te lo reservo?'}
-                  {selectedNiche === 'restaurantes' && '¡Hola! Con gusto. Mesa libre a las 21:30 para 4. ¿A qué nombre anoto la reserva?'}
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* TABLA DE PLANES */}
-          <section id="seccion-planes" className="max-w-5xl mx-auto px-4 space-y-8 pt-4">
-            <div className="text-center space-y-1">
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-                Planes Transparentes y Escalables
-              </h2>
-              <p className="text-xs text-slate-400">
-                Elige la opción que mejor se adapte a tu estructura actual:
-              </p>
-            </div>
-
-            <div className="grid md:grid-cols-3 gap-6 items-stretch">
-              
-              {/* STARTER */}
-              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between space-y-6 hover:border-slate-700 transition">
-                <div className="space-y-4">
-                  <div>
-                    <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2.5 py-1 rounded-full uppercase tracking-wider">
-                      Solo / Individual
-                    </span>
-                    <h3 className="text-xl font-bold text-white mt-3">Starter</h3>
-                    <p className="text-xs text-slate-400 mt-1">1 Profesional autónomo</p>
-                  </div>
-
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-3xl font-extrabold text-white">29€</span>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-left">
+              {/* Starter */}
+              <div className="p-8 bg-[#131822] rounded-3xl border border-slate-800 flex flex-col justify-between hover:border-slate-700 transition-all">
+                <div>
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Starter 🌱</span>
+                  <div className="flex items-baseline gap-1 my-4">
+                    <span className="text-4xl font-extrabold text-white">29€</span>
                     <span className="text-xs text-slate-400">/ mes</span>
                   </div>
-
-                  <ul className="space-y-2 text-xs text-slate-300 border-t border-slate-800 pt-4">
-                    <li className="flex items-center gap-2">✓ <strong>1 Profesional</strong> (1 agenda)</li>
-                    <li className="flex items-center gap-2">✓ Hasta 150 citas / mes</li>
-                    <li className="flex items-center gap-2">✓ Agente IA para reservas 24/7</li>
-                    <li className="flex items-center gap-2">✓ Recordatorios automáticos</li>
-                    <li className="flex items-center gap-2">✓ Integración con WhatsApp</li>
+                  <p className="text-xs text-slate-400 mb-6">Para pequeños negocios locales o independientes.</p>
+                  <ul className="space-y-3 text-xs text-slate-300 mb-8">
+                    <li className="flex items-center gap-2"><Check className="w-4 h-4 text-[#6B8F71]"/> 1 Agente de Voz IA</li>
+                    <li className="flex items-center gap-2"><Check className="w-4 h-4 text-[#6B8F71]"/> Hasta 100 citas/mes</li>
+                    <li className="flex items-center gap-2"><Check className="w-4 h-4 text-[#6B8F71]"/> Calendario dinámico</li>
                   </ul>
                 </div>
-
-                <button
-                  onClick={() => setCurrentStep('onboarding')}
-                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-3 rounded-xl transition cursor-pointer"
+                <button 
+                  onClick={() => { setStep('onboarding'); setOnboardingSubStep(1); }} 
+                  className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition-all"
                 >
                   Seleccionar Starter
                 </button>
               </div>
 
-              {/* GROWTH */}
-              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between space-y-6 hover:border-slate-700 transition">
-                <div className="space-y-4">
-                  <div>
-                    <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2.5 py-1 rounded-full uppercase tracking-wider">
-                      Equipo Pequeño
-                    </span>
-                    <h3 className="text-xl font-bold text-white mt-3">Growth</h3>
-                    <p className="text-xs text-slate-400 mt-1">Hasta 3 profesionales</p>
-                  </div>
-
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-3xl font-extrabold text-white">49€</span>
+              {/* Business Pro */}
+              <div className="p-8 bg-[#161E2E] rounded-3xl border-2 border-[#6B8F71] flex flex-col justify-between shadow-xl shadow-[#6B8F71]/10 relative scale-105">
+                <div className="absolute -top-3.5 right-6 bg-[#6B8F71] text-white text-[10px] font-extrabold px-3 py-1 rounded-full uppercase tracking-wider">
+                  POPULAR 🔥
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-[#88B08E] uppercase tracking-wider">Business Pro ⚡</span>
+                  <div className="flex items-baseline gap-1 my-4">
+                    <span className="text-4xl font-extrabold text-white">49€</span>
                     <span className="text-xs text-slate-400">/ mes</span>
                   </div>
-
-                  <ul className="space-y-2 text-xs text-slate-300 border-t border-slate-800 pt-4">
-                    <li className="flex items-center gap-2">✓ <strong>Hasta 3 Profesionales</strong></li>
-                    <li className="flex items-center gap-2">✓ Hasta 500 citas / mes</li>
-                    <li className="flex items-center gap-2">✓ Todo lo del plan Starter</li>
-                    <li className="flex items-center gap-2">✓ Reagendación automática</li>
-                    <li className="flex items-center gap-2">✓ Analítica básica de ingresos</li>
+                  <p className="text-xs text-slate-400 mb-6">Para clínicas y negocios con alto flujo de clientes.</p>
+                  <ul className="space-y-3 text-xs text-slate-200 mb-8">
+                    <li className="flex items-center gap-2"><Check className="w-4 h-4 text-[#6B8F71]"/> Agente Telefónico 24/7</li>
+                    <li className="flex items-center gap-2"><Check className="w-4 h-4 text-[#6B8F71]"/> Yield Management automático</li>
+                    <li className="flex items-center gap-2"><Check className="w-4 h-4 text-[#6B8F71]"/> Múltiples Especialistas</li>
                   </ul>
                 </div>
-
-                <button
-                  onClick={() => setCurrentStep('onboarding')}
-                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-3 rounded-xl transition cursor-pointer"
+                <button 
+                  onClick={() => { setStep('onboarding'); setOnboardingSubStep(1); }} 
+                  className="w-full py-3.5 bg-[#6B8F71] hover:bg-[#58775d] text-white font-bold rounded-xl text-xs transition-all shadow-md"
                 >
-                  Seleccionar Growth
+                  Seleccionar Pro 🚀
                 </button>
               </div>
 
-              {/* UNLIMITED */}
-              <div className="bg-slate-900 border-2 border-[#587b6a] rounded-2xl p-6 flex flex-col justify-between space-y-6 shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 bg-[#587b6a] text-white text-[9px] font-bold px-3 py-1 rounded-bl-xl uppercase tracking-wider">
-                  MÁXIMO VALOR
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <span className="text-[10px] font-bold text-emerald-400 bg-[#587b6a]/20 px-2.5 py-1 rounded-full uppercase tracking-wider border border-[#587b6a]/30">
-                      MÁS POPULAR
-                    </span>
-                    <h3 className="text-xl font-bold text-white mt-3">Unlimited</h3>
-                    <p className="text-xs text-slate-400 mt-1">Sin límites de uso</p>
-                  </div>
-
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-3xl font-extrabold text-white">59€</span>
+              {/* Elite */}
+              <div className="p-8 bg-[#131822] rounded-3xl border border-slate-800 flex flex-col justify-between hover:border-slate-700 transition-all">
+                <div>
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Elite / Multi-Sede 👑</span>
+                  <div className="flex items-baseline gap-1 my-4">
+                    <span className="text-4xl font-extrabold text-white">59€</span>
                     <span className="text-xs text-slate-400">/ mes</span>
                   </div>
-
-                  <ul className="space-y-2 text-xs text-slate-200 border-t border-slate-800 pt-4">
-                    <li className="flex items-center gap-2">✓ <strong>Profesionales ILIMITADOS</strong></li>
-                    <li className="flex items-center gap-2">✓ <strong>Citas e interacciones ILIMITADAS</strong></li>
-                    <li className="flex items-center gap-2">✓ Reactivación automática de clientes antiguos</li>
-                    <li className="flex items-center gap-2">✓ Dashboard financiero completo</li>
-                    <li className="flex items-center gap-2">✓ Onboarding personalizado incluido</li>
+                  <p className="text-xs text-slate-400 mb-6">Para cadenas y franquicias con múltiples líneas.</p>
+                  <ul className="space-y-3 text-xs text-slate-300 mb-8">
+                    <li className="flex items-center gap-2"><Check className="w-4 h-4 text-[#6B8F71]"/> Todo incluido en Pro</li>
+                    <li className="flex items-center gap-2"><Check className="w-4 h-4 text-[#6B8F71]"/> Multi-Sede & Multi-Línea</li>
+                    <li className="flex items-center gap-2"><Check className="w-4 h-4 text-[#6B8F71]"/> Soporte Prioritario 24/7</li>
                   </ul>
                 </div>
-
-                <button
-                  onClick={() => setCurrentStep('onboarding')}
-                  className="w-full bg-[#587b6a] hover:bg-[#466355] text-white font-bold text-xs py-3 rounded-xl transition shadow-lg shadow-[#587b6a]/30 cursor-pointer active:scale-95"
+                <button 
+                  onClick={() => { setStep('onboarding'); setOnboardingSubStep(1); }} 
+                  className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition-all"
                 >
-                  Elegir Plan Unlimited →
-                </button>
-              </div>
-
-            </div>
-
-            <p className="text-center text-[11px] text-slate-500 font-medium">
-              * ¿Necesitas múltiples sucursales? Añade sedes o números adicionales por solo +15€/mes cada uno.
-            </p>
-          </section>
-
-          {/* CTA FINAL */}
-          <section className="max-w-4xl mx-auto px-4 text-center">
-            <div className="bg-slate-900 border border-[#587b6a]/40 p-8 rounded-3xl space-y-4 shadow-xl">
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-                Empieza a agendar clientes en piloto automático
-              </h2>
-              <p className="text-xs text-slate-400 max-w-md mx-auto">
-                Configuración lista en menos de 3 minutos. Sin contratos permanentes.
-              </p>
-              <div>
-                <button
-                  onClick={scrollToPlanes}
-                  className="bg-[#587b6a] hover:bg-[#466355] text-white font-bold text-xs px-8 py-3.5 rounded-xl transition shadow-xl shadow-[#587b6a]/30 cursor-pointer active:scale-95"
-                >
-                  Elegir mi plan →
-                </button>
-              </div>
-            </div>
-          </section>
-
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* PASO 1: ONBOARDING / REGISTRO DEL NEGOCIO                                 */}
-      {/* ========================================================================= */}
-      {currentStep === 'onboarding' && (
-        <div className="max-w-2xl mx-auto p-4 md:p-6 pt-10">
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 md:p-8 shadow-xl space-y-6">
-            <div className="border-b border-slate-100 pb-4">
-              <span className="text-[10px] font-bold text-[#587b6a] bg-emerald-50 px-2.5 py-1 rounded-full uppercase tracking-wider border border-emerald-100">
-                Paso 1 de 3
-              </span>
-              <h1 className="text-2xl font-extrabold text-slate-900 mt-2">Configuración Inicial del Negocio</h1>
-              <p className="text-xs text-slate-500 mt-0.5">Ingresa los datos para alimentar la IA de agendamiento.</p>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Nombre Comercial</label>
-                <input
-                  type="text"
-                  value={nombreNegocio}
-                  onChange={(e) => setNombreNegocio(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#587b6a] focus:bg-white transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Teléfono WhatsApp</label>
-                <input
-                  type="text"
-                  value={telefonoWhatsApp}
-                  onChange={(e) => setTelefonoWhatsApp(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#587b6a] focus:bg-white transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Servicios Principales</label>
-                <div className="space-y-2">
-                  {servicios.map((s) => (
-                    <div key={s.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-800">
-                      <span className="font-semibold">{s.nombre} ({s.duracion})</span>
-                      <span className="font-bold text-[#587b6a]">€{s.precio} EUR</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-4 flex justify-end">
-                <button
-                  onClick={() => setCurrentStep('whatsapp')}
-                  className="bg-[#587b6a] hover:bg-[#466355] text-white px-6 py-3 rounded-xl font-bold text-xs transition shadow-md shadow-[#587b6a]/20 cursor-pointer active:scale-95"
-                >
-                  Continuar a Conexión IA →
+                  Seleccionar Elite
                 </button>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        </main>
+      </div>
+    );
+  }
 
-      {/* ========================================================================= */}
-      {/* PASO 2: VINCULACIÓN DE WHATSAPP                                           */}
-      {/* ========================================================================= */}
-      {currentStep === 'whatsapp' && (
-        <div className="max-w-2xl mx-auto p-4 md:p-6 pt-10">
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 md:p-8 shadow-xl space-y-6">
-            <div className="border-b border-slate-100 pb-4">
-              <span className="text-[10px] font-bold text-[#587b6a] bg-emerald-50 px-2.5 py-1 rounded-full uppercase tracking-wider border border-emerald-100">
-                Paso 2 de 3
-              </span>
-              <h1 className="text-2xl font-extrabold text-slate-900 mt-2">Conexión con WhatsApp & IA</h1>
-              <p className="text-xs text-slate-500 mt-0.5">Vincula la línea para activar las respuestas automáticas.</p>
-            </div>
+  // ==========================================
+  // 2. ONBOARDING SECUENCIAL (PASOS 1 AL 4)
+  // ==========================================
+  if (step === 'onboarding') {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] text-gray-900 flex flex-col items-center justify-center p-4">
+        <button 
+          onClick={() => {
+            if (onboardingSubStep > 1) setOnboardingSubStep(onboardingSubStep - 1);
+            else setStep('landing');
+          }} 
+          className="mb-6 text-xs font-bold text-gray-500 hover:text-gray-900 transition-colors"
+        >
+          ← Volver
+        </button>
 
-            <div className="grid md:grid-cols-2 gap-6 items-center">
-              <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col items-center text-center space-y-4">
-                <div className="w-36 h-36 bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between items-center">
-                  <div className="flex justify-between w-full">
-                    <div className="w-6 h-6 bg-slate-200 rounded"></div>
-                    <div className="w-6 h-6 bg-slate-200 rounded"></div>
-                  </div>
-                  <div className="text-[9px] text-[#587b6a] font-mono font-bold tracking-wider uppercase">WA_CONNECTED</div>
-                  <div className="flex justify-between w-full">
-                    <div className="w-6 h-6 bg-slate-200 rounded"></div>
-                    <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-ping"></div>
-                  </div>
+        <div className="max-w-md w-full bg-white rounded-3xl p-8 shadow-xl border border-gray-100 space-y-6">
+          
+          {/* PASO 1: NOMBRE Y CORREO[cite: 5] */}
+          {onboardingSubStep === 1 && (
+            <div className="space-y-4">
+              <div className="text-center">
+                <div className="w-12 h-12 bg-gray-100 text-gray-700 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner">
+                  <Bot className="w-6 h-6 text-[#6B8F71]" />
                 </div>
+                <h2 className="text-xl font-bold text-gray-900">Bienvenido a tu CRM</h2>
+                <p className="text-xs text-gray-500 mt-1">Configura tu cuenta en menos de 2 minutos[cite: 5].</p>
+              </div>
 
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  Línea Conectada
-                </span>
+              <div className="space-y-3 pt-2">
+                <div>
+                  <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1">Nombre del negocio</label>
+                  <input 
+                    type="text" 
+                    placeholder="Ej. Barbería El Buen Corte[cite: 5]" 
+                    value={businessInfo.name} 
+                    onChange={e => setBusinessInfo({...businessInfo, name: e.target.value})}
+                    className="w-full p-3 rounded-xl border text-xs bg-gray-50 focus:bg-white transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1">Correo electrónico</label>
+                  <input 
+                    type="email" 
+                    placeholder="tu@negocio.com[cite: 5]" 
+                    value={businessInfo.email} 
+                    onChange={e => setBusinessInfo({...businessInfo, email: e.target.value})}
+                    className="w-full p-3 rounded-xl border text-xs bg-gray-50 focus:bg-white transition-all"
+                  />
+                </div>
+                <button 
+                  onClick={() => {
+                    if (!businessInfo.name || !businessInfo.email) {
+                      showToast("Por favor completa los campos.");
+                      return;
+                    }
+                    setOnboardingSubStep(2);
+                  }}
+                  className="w-full py-3.5 bg-[#6B8F71] hover:bg-[#58775d] text-white font-bold rounded-xl text-xs transition-all shadow-md mt-2"
+                >
+                  Enviar código[cite: 5]
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* PASO 2: VERIFICAR CÓDIGO[cite: 6] */}
+          {onboardingSubStep === 2 && (
+            <div className="space-y-4 text-center">
+              <div className="w-12 h-12 bg-gray-100 text-gray-700 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner">
+                <Key className="w-6 h-6 text-[#6B8F71]" />
+              </div>
+              <h2 className="text-xl font-bold text-gray-900">Verifica tu correo[cite: 6]</h2>
+              <p className="text-xs text-gray-500">Escribe el código de 6 dígitos que enviamos a <strong className="text-gray-800">{businessInfo.email || 'tu correo'}</strong>[cite: 6].</p>
+
+              <div className="flex justify-center gap-2 my-4">
+                {[0, 1, 2, 3, 4, 5].map(idx => (
+                  <input 
+                    key={idx}
+                    type="text" 
+                    maxLength={1}
+                    value={verificationCode[idx]}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const newCode = [...verificationCode];
+                      newCode[idx] = val;
+                      setVerificationCode(newCode);
+                    }}
+                    className="w-10 h-12 text-center text-lg font-bold border rounded-xl bg-gray-50 focus:border-[#6B8F71] focus:outline-none"
+                  />
+                ))}
+              </div>
+
+              <button 
+                onClick={() => setOnboardingSubStep(3)}
+                className="w-full py-3.5 bg-[#6B8F71] hover:bg-[#58775d] text-white font-bold rounded-xl text-xs transition-all shadow-md"
+              >
+                Verificar y continuar[cite: 6]
+              </button>
+              <button onClick={() => showToast("Código reenviado.")} className="text-[11px] text-gray-400 hover:text-gray-700 block mx-auto">
+                Reenviar código[cite: 6]
+              </button>
+            </div>
+          )}
+
+          {/* PASO 3: MONEDA Y HORARIO[cite: 7] */}
+          {onboardingSubStep === 3 && (
+            <div className="space-y-5">
+              <div className="flex justify-between items-center text-xs text-gray-400 font-semibold">
+                <span>Paso 1 de 3[cite: 7]</span>
+                <span>Configuración inicial</span>
+              </div>
+
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Moneda y horario[cite: 7]</h2>
+                <p className="text-xs text-gray-500 mt-1">Define cómo se verán tus precios y en qué horario atiendes[cite: 7].</p>
               </div>
 
               <div className="space-y-4">
-                <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider">Simulación en tiempo real</h3>
-                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2.5 text-xs">
-                  <div className="bg-white p-2.5 rounded-lg border border-slate-200 text-slate-800 shadow-sm">
-                    <p className="text-[9px] text-slate-400 font-bold">Cliente</p>
-                    Hola, ¿tienen disponibilidad para agendar hoy?
-                  </div>
-                  <div className="bg-[#587b6a] text-white p-2.5 rounded-lg ml-auto max-w-[90%] shadow-sm">
-                    <p className="text-[9px] text-emerald-100 font-bold">IA {nombreNegocio}</p>
-                    ¡Hola! Sí, tengo sitio disponible a las 16:00 y 17:30. ¿Cuál te va mejor?
+                <div>
+                  <label className="text-[11px] font-bold text-gray-500 uppercase block mb-2">Moneda[cite: 7]</label>
+                  <div className="flex gap-2">
+                    {['MXN $', 'USD $', 'EUR €'].map(curr => {
+                      const code = curr.split(' ')[0];
+                      const isSelected = businessInfo.currency === code;
+                      return (
+                        <button
+                          key={code}
+                          type="button"
+                          onClick={() => setBusinessInfo({...businessInfo, currency: code})}
+                          className={`flex-1 py-2.5 rounded-xl text-xs font-bold border transition-all ${
+                            isSelected ? 'bg-[#6B8F71] text-white border-[#6B8F71] shadow-sm' : 'bg-gray-50 text-gray-600 border-gray-200'
+                          }`}
+                        >
+                          {curr}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                <div className="pt-2 flex justify-end">
-                  <button
-                    onClick={() => setCurrentStep('dashboard')}
-                    className="bg-[#587b6a] hover:bg-[#466355] text-white px-6 py-3 rounded-xl font-bold text-xs transition shadow-md shadow-[#587b6a]/20 cursor-pointer active:scale-95"
-                  >
-                    Ir al Dashboard →
-                  </button>
+                <div>
+                  <label className="text-[11px] font-bold text-gray-500 uppercase block mb-2">Horario de atención[cite: 7]</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <span className="text-[10px] text-gray-400 font-bold block mb-1">Abre[cite: 7]</span>
+                      <input 
+                        type="time" 
+                        value={businessInfo.hoursStart}
+                        onChange={e => setBusinessInfo({...businessInfo, hoursStart: e.target.value})}
+                        className="w-full p-2.5 rounded-xl border text-xs bg-gray-50 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-gray-400 font-bold block mb-1">Cierra[cite: 7]</span>
+                      <input 
+                        type="time" 
+                        value={businessInfo.hoursEnd}
+                        onChange={e => setBusinessInfo({...businessInfo, hoursEnd: e.target.value})}
+                        className="w-full p-2.5 rounded-xl border text-xs bg-gray-50 font-bold"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
+
+              <button 
+                onClick={() => setOnboardingSubStep(4)}
+                className="w-full py-3.5 bg-[#6B8F71] hover:bg-[#58775d] text-white font-bold rounded-xl text-xs transition-all shadow-md"
+              >
+                Continuar[cite: 7]
+              </button>
             </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* ========================================================================= */}
-      {/* PASO 3: DASHBOARD PRINCIPAL                                               */}
-      {/* ========================================================================= */}
-      {currentStep === 'dashboard' && (
-        <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-6 pt-6">
-          
-          <header className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 md:p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-[#587b6a] text-white font-bold flex items-center justify-center text-lg uppercase shadow-md shadow-[#587b6a]/20">
-                {nombreNegocio.charAt(0)}
+          {/* PASO 4: SERVICIOS Y PRECIOS[cite: 8] */}
+          {onboardingSubStep === 4 && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center text-xs text-gray-400 font-semibold">
+                <span>Paso 2 de 3[cite: 8]</span>
+                <span>Catálogo</span>
               </div>
+
               <div>
-                <h2 className="font-bold text-slate-900 text-base leading-tight">{nombreNegocio}</h2>
-                <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-600 font-semibold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  Agente IA Activo
-                </span>
+                <h2 className="text-xl font-bold text-gray-900">Servicios y precios[cite: 8]</h2>
+                <p className="text-xs text-gray-500 mt-1">Agrega los servicios que ofreces, con su precio y duración[cite: 8].</p>
               </div>
-            </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <nav className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-semibold">
-                <button
-                  onClick={() => setActiveTab('citas')}
-                  className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                    activeTab === 'citas' ? 'bg-[#587b6a] text-white font-bold shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                  }`}
+              <div className="space-y-3 bg-gray-50 p-4 rounded-2xl border">
+                <input 
+                  type="text" 
+                  placeholder="Ej. Corte de cabello[cite: 8]"
+                  value={newService.name}
+                  onChange={e => setNewService({...newService, name: e.target.value})}
+                  className="w-full p-2.5 rounded-xl border text-xs bg-white"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <input 
+                    type="number" 
+                    placeholder="Precio ($)[cite: 8]"
+                    value={newService.price}
+                    onChange={e => setNewService({...newService, price: e.target.value})}
+                    className="w-full p-2.5 rounded-xl border text-xs bg-white"
+                  />
+                  <input 
+                    type="number" 
+                    placeholder="Duración (min)[cite: 8]"
+                    value={newService.duration}
+                    onChange={e => setNewService({...newService, duration: e.target.value})}
+                    className="w-full p-2.5 rounded-xl border text-xs bg-white"
+                  />
+                </div>
+                <button 
+                  onClick={() => {
+                    if(!newService.name || !newService.price) return;
+                    setServices([...services, { id: Date.now().toString(), ...newService }]);
+                    setNewService({ name: '', price: '', duration: '' });
+                    showToast("Servicio agregado.");
+                  }}
+                  className="w-full py-2 bg-gray-900 text-white font-bold rounded-xl text-xs shadow-sm"
                 >
-                  📅 Citas
-                </button>
-                <button
-                  onClick={() => setActiveTab('clientes')}
-                  className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                    activeTab === 'clientes' ? 'bg-[#587b6a] text-white font-bold shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  👥 Clientes ({citas.length})
-                </button>
-                <button
-                  onClick={() => setActiveTab('automations')}
-                  className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                    activeTab === 'automations' ? 'bg-[#587b6a] text-white font-bold shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  🤖 Automatizaciones
-                </button>
-              </nav>
-
-              <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold">
-                <button
-                  onClick={() => setLang('es')}
-                  className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${lang === 'es' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
-                >
-                  ES
-                </button>
-                <button
-                  onClick={() => setLang('en')}
-                  className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${lang === 'en' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
-                >
-                  EN
+                  + + Agregar servicio[cite: 8]
                 </button>
               </div>
-            </div>
-          </header>
 
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 md:p-6 shadow-sm min-h-[380px]">
-
-            {activeTab === 'citas' && (
-              <div className="space-y-5">
-                <div className="bg-[#587b6a] text-white p-5 rounded-xl shadow-md space-y-1">
-                  <p className="text-[10px] font-bold tracking-wider text-emerald-100 uppercase">
-                    INGRESOS DEL DÍA (COMPLETADOS)
-                  </p>
-                  <h1 className="text-3xl font-extrabold tracking-tight">€{ingresosDelDia} EUR</h1>
-                  <p className="text-xs text-emerald-100/90">
-                    Calculado automáticamente con base en el valor de las citas finalizadas.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-3 pb-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900">Agenda del</h3>
-                    <input
-                      type="date"
-                      value={selectedDate}
-                      onChange={(e) => setSelectedDate(e.target.value)}
-                      className="border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-bold bg-slate-50 text-slate-900 outline-none focus:border-[#587b6a]"
-                    />
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      setNuevaCita({ ...nuevaCita, fecha: selectedDate });
-                      setIsModalOpen(true);
-                    }}
-                    className="bg-[#587b6a] hover:bg-[#466355] text-white font-semibold text-xs px-4 py-2 rounded-xl transition cursor-pointer shadow-sm active:scale-95"
-                  >
-                    + Agendar cita
-                  </button>
-                </div>
-
-                {citasDelDia.length === 0 ? (
-                  <p className="text-xs text-slate-400 py-8 text-center border border-dashed border-slate-200 rounded-xl">
-                    No hay citas agendadas para esta fecha.
-                  </p>
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {services.length === 0 ? (
+                  <p className="text-center text-xs text-gray-400 py-2">Aún no agregaste servicios[cite: 8].</p>
                 ) : (
-                  <div className="space-y-2.5">
-                    {citasDelDia.map((c) => (
-                      <div key={c.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <span className="text-xs font-bold text-[#587b6a]">{c.horaInicio} - {c.horaFin}</span>
-                          <p className="font-bold text-slate-900 text-xs mt-0.5">
-                            {c.cliente} <span className="text-[11px] font-normal text-slate-500">({c.telefono})</span>
-                          </p>
-                          <p className="text-[11px] text-slate-600">
-                            {c.servicio} • <span className="font-bold text-[#587b6a]">€{c.precio} EUR</span>
-                          </p>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[9px] font-bold px-2.5 py-1 rounded-full uppercase ${
-                            c.estado === 'completada' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
-                            c.estado === 'confirmada' ? 'bg-slate-200 text-slate-800 border border-slate-300' :
-                            'bg-red-100 text-red-800 border border-red-200'
-                          }`}>
-                            {c.estado}
-                          </span>
-
-                          {c.estado !== 'completada' && (
-                            <button
-                              onClick={() => cambiarEstadoCita(c.id, 'completada')}
-                              className="text-xs bg-[#587b6a] hover:bg-[#466355] text-white font-semibold px-2.5 py-1 rounded-lg transition cursor-pointer shadow-sm"
-                            >
-                              ✓
-                            </button>
-                          )}
-
-                          {c.estado !== 'cancelada' && (
-                            <button
-                              onClick={() => cambiarEstadoCita(c.id, 'cancelada')}
-                              className="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-2.5 py-1 rounded-lg transition cursor-pointer"
-                            >
-                              ✕
-                            </button>
-                          )}
-
-                          <button
-                            onClick={() => eliminarCita(c.id)}
-                            className="text-xs text-slate-400 hover:text-red-600 p-1 transition cursor-pointer"
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  services.map(s => (
+                    <div key={s.id} className="flex justify-between items-center bg-white p-2.5 rounded-xl border text-xs">
+                      <span className="font-bold">{s.name}</span>
+                      <span className="text-gray-500">{s.price} {businessInfo.currency} ({s.duration}m)</span>
+                    </div>
+                  ))
                 )}
               </div>
-            )}
 
-            {activeTab === 'automations' && (
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900 tracking-tight">Automatizaciones de WhatsApp</h3>
-                  <p className="text-xs text-slate-500">Ajustes activos para optimizar tu tiempo.</p>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="p-4 border border-slate-200 rounded-xl bg-slate-50 flex items-center justify-between gap-3">
-                    <div>
-                      <h4 className="font-bold text-slate-900 text-xs">Respuesta Automática WhatsApp IA</h4>
-                      <p className="text-[11px] text-slate-500">Atención y reserva 24/7 en segundo plano.</p>
-                    </div>
-                    <button
-                      onClick={() => setAutomatizaciones({ ...automatizaciones, whatsappAuto: !automatizaciones.whatsappAuto })}
-                      className={`w-7 h-7 rounded-full text-white font-bold text-xs flex items-center justify-center cursor-pointer transition ${
-                        automatizaciones.whatsappAuto ? 'bg-[#587b6a]' : 'bg-slate-300'
-                      }`}
-                    >
-                      ✓
-                    </button>
-                  </div>
-
-                  <div className="p-4 border border-slate-200 rounded-xl bg-slate-50 flex items-center justify-between gap-3">
-                    <div>
-                      <h4 className="font-bold text-slate-900 text-xs">Recordatorios Anti-Ausencias (24h)</h4>
-                      <p className="text-[11px] text-slate-500">Mensajes de reconfirmación previa.</p>
-                    </div>
-                    <button
-                      onClick={() => setAutomatizaciones({ ...automatizaciones, recordatorios24h: !automatizaciones.recordatorios24h })}
-                      className={`w-7 h-7 rounded-full text-white font-bold text-xs flex items-center justify-center cursor-pointer transition ${
-                        automatizaciones.recordatorios24h ? 'bg-[#587b6a]' : 'bg-slate-300'
-                      }`}
-                    >
-                      ✓
-                    </button>
-                  </div>
-                </div>
+              <div className="flex gap-2 pt-2">
+                <button 
+                  onClick={() => setOnboardingSubStep(3)}
+                  className="flex-1 py-3 border text-gray-600 font-bold rounded-xl text-xs hover:bg-gray-50"
+                >
+                  Atrás[cite: 8]
+                </button>
+                <button 
+                  onClick={() => {
+                    if(services.length === 0) {
+                      showToast("Agrega al menos un servicio para continuar.");
+                      return;
+                    }
+                    setStep('dashboard'); // FINALIZA ONBOARDING Y MANDA AL DASHBOARD
+                  }}
+                  className="flex-1 py-3 bg-[#6B8F71] hover:bg-[#58775d] text-white font-bold rounded-xl text-xs shadow-md"
+                >
+                  Continuar[cite: 8]
+                </button>
               </div>
-            )}
+            </div>
+          )}
 
-            {activeTab === 'clientes' && (
-              <div className="space-y-3">
-                <h3 className="text-base font-bold text-slate-900">Directorio de Clientes</h3>
-                <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
-                  {citas.map((c, i) => (
-                    <div key={i} className="p-3.5 bg-slate-50 flex justify-between items-center">
-                      <div>
-                        <p className="font-bold text-slate-900 text-xs">{c.cliente}</p>
-                        <p className="text-[11px] text-slate-500">{c.telefono}</p>
-                      </div>
-                      <span className="text-[10px] font-semibold bg-emerald-50 text-[#587b6a] border border-emerald-200 px-2.5 py-0.5 rounded-full">
-                        Registrado
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+        </div>
+      </div>
+    );
+  }
 
+  // ==========================================
+  // 3. DASHBOARD CRM (POST-ONBOARDING)
+  // ==========================================
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] text-gray-900 flex flex-col font-sans">
+      <header className="bg-white border-b px-6 py-4 flex justify-between items-center sticky top-0 z-30 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-gray-900 text-white rounded-xl flex items-center justify-center font-bold text-lg">
+            {businessInfo.name ? businessInfo.name.charAt(0) : 'G'}
           </div>
+          <div>
+            <h1 className="font-bold text-gray-900">{businessInfo.name || 'Mi Negocio'}</h1>
+            <span className="flex items-center gap-1.5 text-[10px] font-bold text-[#6B8F71] uppercase tracking-wider">
+              <span className="w-2 h-2 rounded-full bg-[#6B8F71] animate-pulse"></span> Agente IA En Línea
+            </span>
+          </div>
+        </div>
+
+        <nav className="flex bg-gray-100 p-1 rounded-2xl">
+          {[
+            { id: 'appointments', label: 'Agenda' },
+            { id: 'clients', label: 'Clientes' },
+            { id: 'automations', label: 'Automatizaciones' },
+            { id: 'settings', label: 'Ajustes' }
+          ].map(tab => (
+            <button 
+              key={tab.id} 
+              onClick={() => setActiveTab(tab.id)} 
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                activeTab === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        <button 
+          onClick={() => { setStep('landing'); setOnboardingSubStep(1); }} 
+          className="text-xs font-bold text-rose-500 hover:text-rose-700 transition-colors"
+        >
+          Cerrar Sesión 🚪
+        </button>
+      </header>
+
+      {toast && (
+        <div className="fixed top-20 right-6 z-50 bg-gray-900 text-white px-5 py-3 rounded-2xl shadow-xl text-xs flex items-center gap-2 border border-gray-700">
+          <Sparkles className="w-4 h-4 text-[#6B8F71]" /> {toast}
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL: CREAR CITA MANUAL                                                  */}
-      {/* ========================================================================= */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white text-slate-900 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-200">
-            <div className="flex justify-between items-center border-b pb-3 border-slate-100">
-              <h3 className="text-base font-bold text-slate-900">Agendar Cita Manual</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xs cursor-pointer">✕</button>
+      <main className="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {activeTab === 'appointments' && (
+          <>
+            <div className="lg:col-span-4 space-y-6">
+              <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm space-y-2">
+                <label className="text-[11px] font-bold text-gray-500 uppercase">Seleccionar Fecha</label>
+                <input 
+                  type="date" 
+                  value={selectedDate} 
+                  onChange={(e) => setSelectedDate(e.target.value)} 
+                  className="w-full p-3 rounded-xl border text-sm font-bold text-gray-700 focus:ring-2 focus:ring-[#6B8F71]" 
+                />
+              </div>
+
+              <div className="bg-gradient-to-br from-[#6B8F71] to-gray-900 p-6 rounded-3xl text-white shadow-lg space-y-1">
+                <span className="text-[10px] uppercase font-bold text-white/70 tracking-widest">Facturación Total</span>
+                <div className="text-3xl font-extrabold">
+                  {appointments.filter(a => a.status === 'completed').reduce((sum, a) => sum + (a.price || 0), 0).toLocaleString()} {businessInfo.currency}
+                </div>
+                <p className="text-[11px] text-white/60">Citas completadas.</p>
+              </div>
             </div>
 
-            <form onSubmit={handleCrearCita} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre del Cliente</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="ej. Dra. Andrea Gómez"
-                  value={nuevaCita.cliente}
-                  onChange={(e) => setNuevaCita({ ...nuevaCita, cliente: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-medium text-slate-900 outline-none focus:border-[#587b6a]"
-                />
+            <div className="lg:col-span-8 space-y-4">
+              <div className="flex justify-between items-center bg-white p-4 rounded-3xl border shadow-sm">
+                <h2 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-[#6B8F71]"/> Agenda • {selectedDate}
+                </h2>
+                <button 
+                  onClick={() => setIsApptModalOpen(true)} 
+                  className="px-4 py-2 bg-[#6B8F71] hover:bg-[#58775d] text-white text-xs font-bold rounded-xl transition-all shadow-sm"
+                >
+                  + Nueva Cita
+                </button>
               </div>
 
+              {appointments.filter(a => a.date === selectedDate).length === 0 ? (
+                <div className="text-center p-10 bg-white rounded-3xl border border-dashed">
+                  <Calendar className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-gray-600">No hay citas para esta fecha.</p>
+                  <p className="text-xs text-gray-400 mt-1">La IA gestionará automáticamente las reservas entrantes.</p>
+                </div>
+              ) : (
+                appointments.filter(a => a.date === selectedDate).map(appt => {
+                  const svc = services.find(s => s.id === appt.serviceId);
+                  return (
+                    <div key={appt.id} className="bg-white p-4 rounded-2xl border shadow-sm flex items-center justify-between">
+                      <div className="flex gap-4 items-center">
+                        <div className="bg-gray-50 border px-3 py-2 rounded-xl text-center">
+                          <span className="text-sm font-bold text-[#6B8F71]">{appt.time}</span>
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-gray-900 text-sm">{appt.clientName}</h4>
+                          <span className="text-xs text-gray-500">{svc?.name || 'Servicio'} • {appt.clientPhone}</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => setAppointments(appointments.map(a => a.id === appt.id ? {...a, status: 'completed'} : a))} 
+                          className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100"
+                        >
+                          <CheckCircle className="w-4 h-4"/>
+                        </button>
+                        <button 
+                          onClick={() => setAppointments(appointments.filter(a => a.id !== appt.id))} 
+                          className="p-2 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100"
+                        >
+                          <Trash2 className="w-4 h-4"/>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+        )}
+
+        {activeTab === 'clients' && (
+          <div className="lg:col-span-12 space-y-4">
+            <div className="bg-white p-4 rounded-3xl border shadow-sm">
+              <h2 className="font-bold text-gray-900 text-sm">Directorio de Clientes</h2>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {clients.map(c => (
+                <div key={c.id} className="bg-white p-5 rounded-2xl border shadow-sm space-y-2">
+                  <h4 className="font-bold text-gray-900 text-sm">{c.name}</h4>
+                  <p className="text-xs text-gray-500 flex items-center gap-1.5"><Phone className="w-3.5 h-3.5 text-[#6B8F71]"/> {c.phone}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'automations' && (
+          <div className="lg:col-span-12 space-y-6">
+            <div className="bg-white p-6 rounded-3xl border shadow-sm grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="p-5 bg-[#F8F9FA] rounded-2xl border flex gap-4">
+                <div className="p-3 bg-gray-900 text-white rounded-xl h-fit"><Bot className="w-6 h-6"/></div>
+                <div className="flex-1">
+                  <h4 className="font-bold text-sm text-gray-900">Agente Telefónico IA 📞</h4>
+                  <p className="text-xs text-gray-500 mt-1">Responde llamadas y agenda de forma automática en tu calendario.</p>
+                </div>
+              </div>
+              <div className="p-5 bg-[#F8F9FA] rounded-2xl border flex gap-4">
+                <div className="p-3 bg-[#6B8F71] text-white rounded-xl h-fit"><Zap className="w-6 h-6"/></div>
+                <div className="flex-1">
+                  <h4 className="font-bold text-sm text-gray-900">Yield Management (Relleno de Huecos) ⚡</h4>
+                  <p className="text-xs text-gray-500 mt-1">Llena cancelaciones ofreciendo horarios a clientes recurrentes.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'settings' && (
+          <div className="lg:col-span-12 bg-white p-6 rounded-3xl border shadow-sm space-y-4">
+            <h2 className="font-bold text-gray-900 text-sm">Ajustes del Sistema</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Teléfono</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="+34 600 000 000"
-                  value={nuevaCita.telefono}
-                  onChange={(e) => setNuevaCita({ ...nuevaCita, telefono: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-medium text-slate-900 outline-none focus:border-[#587b6a]"
+                <label className="text-[11px] font-bold text-gray-500 uppercase">Nombre del Negocio</label>
+                <input 
+                  type="text" 
+                  value={businessInfo.name} 
+                  onChange={e => setBusinessInfo({...businessInfo, name: e.target.value})}
+                  className="w-full p-2.5 rounded-xl border text-xs mt-1"
                 />
               </div>
+            </div>
+          </div>
+        )}
+      </main>
 
+      {/* MODAL NUEVA CITA */}
+      {isApptModalOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <h3 className="font-bold text-gray-900 text-base">Agendar Cita Manual</h3>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const svc = services.find(s => s.id === apptForm.serviceId);
+              const newAppt = {
+                id: Date.now().toString(),
+                ...apptForm,
+                price: parseFloat(svc?.price || 0),
+                status: 'pending'
+              };
+              setAppointments([...appointments, newAppt]);
+              setIsApptModalOpen(false);
+              setApptForm({ clientName: '', clientPhone: '', serviceId: '', staffId: '', date: selectedDate, time: '' });
+              showToast("Cita agendada con éxito.");
+            }} className="space-y-3">
+              <div>
+                <label className="text-[11px] font-bold text-gray-500 uppercase">Nombre del Cliente</label>
+                <input 
+                  type="text" required 
+                  value={apptForm.clientName} 
+                  onChange={e => setApptForm({...apptForm, clientName: e.target.value})}
+                  className="w-full p-2.5 rounded-xl border text-xs" 
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-gray-500 uppercase">Teléfono</label>
+                <input 
+                  type="text" required 
+                  value={apptForm.clientPhone} 
+                  onChange={e => setApptForm({...apptForm, clientPhone: e.target.value})}
+                  className="w-full p-2.5 rounded-xl border text-xs" 
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-gray-500 uppercase">Servicio</label>
+                <select 
+                  value={apptForm.serviceId} 
+                  onChange={e => setApptForm({...apptForm, serviceId: e.target.value})}
+                  className="w-full p-2.5 rounded-xl border text-xs" required
+                >
+                  <option value="">Selecciona servicio...</option>
+                  {services.map(s => <option key={s.id} value={s.id}>{s.name} ({s.price} {businessInfo.currency})</option>)}
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Fecha</label>
-                  <input
-                    type="date"
-                    required
-                    value={nuevaCita.fecha}
-                    onChange={(e) => setNuevaCita({ ...nuevaCita, fecha: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-medium text-slate-900 outline-none"
+                  <label className="text-[11px] font-bold text-gray-500 uppercase">Fecha</label>
+                  <input 
+                    type="date" 
+                    value={apptForm.date} 
+                    onChange={e => setApptForm({...apptForm, date: e.target.value})}
+                    className="w-full p-2.5 rounded-xl border text-xs" required 
                   />
                 </div>
-
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Precio (€)</label>
-                  <input
-                    type="number"
-                    required
-                    value={nuevaCita.precio}
-                    onChange={(e) => setNuevaCita({ ...nuevaCita, precio: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 font-medium text-slate-900 outline-none"
+                  <label className="text-[11px] font-bold text-gray-500 uppercase">Hora</label>
+                  <input 
+                    type="time" 
+                    value={apptForm.time} 
+                    onChange={e => setApptForm({...apptForm, time: e.target.value})}
+                    className="w-full p-2.5 rounded-xl border text-xs" required 
                   />
                 </div>
               </div>
-
               <div className="flex justify-end gap-2 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="bg-[#587b6a] hover:bg-[#466355] text-white px-5 py-2 rounded-xl font-bold shadow-md transition cursor-pointer"
-                >
-                  Guardar
-                </button>
+                <button type="button" onClick={() => setIsApptModalOpen(false)} className="px-4 py-2 text-xs font-bold text-gray-500">Cancelar</button>
+                <button type="submit" className="px-4 py-2 bg-[#6B8F71] text-white text-xs font-bold rounded-xl">Guardar</button>
               </div>
             </form>
           </div>
         </div>
       )}
-
     </div>
   );
 }
