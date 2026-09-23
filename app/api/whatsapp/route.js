@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+// Intentamos leer cualquier variante con la que se haya guardado la llave en Vercel
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const openaiApiKey = process.env.OPENAI_API_KEY;
 
 export async function GET(request) {
@@ -39,6 +40,11 @@ export async function POST(request) {
       const messageText = messageObj.text?.body;
 
       if (messageText) {
+        if (!supabaseUrl || !supabaseKey) {
+          console.error("Faltan las credenciales de Supabase en las variables de entorno.");
+          return NextResponse.json({ error: 'Supabase configuration missing' }, { status: 500 });
+        }
+
         const supabase = createClient(supabaseUrl, supabaseKey);
 
         const { data: clinicData } = await supabase
